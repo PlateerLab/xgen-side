@@ -63,6 +63,7 @@ docs/package-lock.json
 
 # pnpm
 .pnpm-store/
+.audit/
 
 # TypeScript
 *.tsbuildinfo
@@ -71,3 +72,8 @@ docs/package-lock.json
 .next/
 out/
 next-env.d.ts
+
+# XGEN Side desktop
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/

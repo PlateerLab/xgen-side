@@ -1,5 +1,6 @@
 packages:
   - '.'
+  - 'apps/*'
   - 'packages/*'
   - 'packages/@agent-browser/*'
   - 'docs'
@@ -11,6 +12,7 @@ minimumReleaseAgeExclude:
   - eve
 allowBuilds:
   '@mongodb-js/zstd': false
+  esbuild: true
   msw: false
   node-liblzma: false
   sharp: false
