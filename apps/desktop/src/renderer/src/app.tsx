@@ -351,7 +351,7 @@ export function App(): ReactElement {
   }
 
   return (
-    <main className="app-shell" data-theme={theme}>
+    <main className="app-shell" data-theme={theme} data-compact={preferences.compact ? 'true' : 'false'}>
       {leftOpen ? (
         <LeftPanel
           activeChatId={activeChatId}

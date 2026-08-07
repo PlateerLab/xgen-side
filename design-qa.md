@@ -1,100 +1,64 @@
-# XGEN Side Product Design QA
+# XGEN Side Liquid Glass Design QA
 
-## Chat Browser Overview
+## Evidence
 
-### Evidence
+- Source visual truth: `artifacts/figma-liquid-glass-audit/01-macos27-kit-node-121-18094.png`
+- Source material detail: `artifacts/figma-liquid-glass-audit/02-macos27-kit-100-percent.png`
+- Implementation home: `artifacts/liquid-glass-home-dark-1280.png`
+- Implementation browser and Agent panel: `artifacts/liquid-glass-browser-dark-final.png`
+- Light theme implementation: `artifacts/liquid-glass-home-light.png`
+- Settings implementation: `artifacts/liquid-glass-settings-dark.png`
+- Full comparison: `artifacts/design-qa-full-comparison.png`
+- Focused comparison: `artifacts/design-qa-focused-comparison.png`
 
-- Source visual truth: `C:\Users\USER\AppData\Local\Temp\codex-clipboard-fa449a6d-eb3f-4303-afe8-099462558747.png`
-- Supplemental dark split-view reference: `C:\Users\USER\AppData\Local\Temp\codex-clipboard-30d3d6b8-c0ae-4d3a-93f6-7480d7d937aa.png`
-- Implementation screenshot: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\chat-browser-overview-final.png`
-- Full-view comparison: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\chat-overview-reference-comparison.png`
-- CSS viewport: 1320 × 708 at device scale factor 1
-- State: normal XGEN Side chat with a URL extraction request routed to the browser agent
+## Normalization
 
-### Findings
+- Full comparison viewport: 1280 × 720 CSS pixels at device scale factor 1.
+- Source overview pixels: 1280 × 720.
+- Normalized implementation pixels: 1280 × 720.
+- Browser and Agent panel evidence pixels: 1484 × 921 at device scale factor 1.
+- State: dark theme, home screen, browser workspace with the Agent panel open, and General settings.
+- The Figma source is a UI kit rather than an XGEN Side screen mock. Layout fidelity is therefore evaluated against the existing XGEN Side information architecture, while material, border, depth, selected state, and control treatment are compared directly.
 
-No actionable P0, P1, or P2 differences remain for the requested Overview experience.
+## Full View Comparison
 
-- Like the Aside reference, a browser task remains part of the originating chat instead of silently switching to a separate browser tab.
-- XGEN Side deliberately makes the selected Skills and effective browser permissions more visible than the reference because Skills are the execution contract, not only progress labels.
-- The right side of the Overview represents the routed browser workspace, target host, and allowed action categories. A live Electron tab thumbnail is deferred until the native capture/view pipeline is connected; the renderer preview does not fabricate page imagery.
+The implementation retains the existing three-surface XGEN Side structure while adopting the source kit's floating material hierarchy. The left navigation is visually separated from the content canvas, the Composer is a distinct elevated material, and selected states use the XGEN accent without tinting every surface.
 
-### Required Fidelity Surfaces
+## Focused Region Comparison
 
-- Typography and hierarchy: the Overview preserves the product's compact Windows typography and uses a clear request, status, Skill, timeline, and workspace hierarchy.
-- Layout: the wide state uses a two-column execution/workspace card inspired by the references; below 900 pixels it becomes a single-column flow without overflow.
-- Colors: `#305EEB` remains the sole product accent for active execution, selected Skills, progress, and controls in both light and dark modes.
-- Assets: Microsoft Fluent System Icons are used for browser, Skill, status, and action affordances; no fake page screenshot or handcrafted icon asset is shown.
-- Copy: every displayed Skill, step, target, status, and permission comes from the routed execution plan rather than decorative static text.
+The focused comparison evaluates the Figma dark menu against the XGEN Side Agent panel. Both use a neutral dark translucent surface, a fine light edge, restrained internal separators, rounded corners, and a saturated blue selected or active state. XGEN Side intentionally uses a more opaque panel than the menu reference because it overlays arbitrary live browser content and must preserve text contrast.
 
-### Interaction Evidence
+## Required Fidelity Surfaces
 
-- A normal conversational prompt produces no Overview and stays in the standard chat response flow.
-- A URL/extraction prompt automatically selects Browser navigation and Structured extraction Skills and inserts the Overview into the same chat.
-- The Overview renders the original request, routing rationale, selected Skills, four execution steps, target host, and effective action categories.
-- Browser access is attached only when selected Skills require it; the action policy begins at `default: deny` and allows only routed categories.
-- Disabling a required Skill blocks the route before provider or browser execution and exposes the reason in the Overview.
-- The 1320 × 708 desktop check and narrow responsive check produced no clipped header or horizontal document overflow.
-- Browser console inspection found zero errors.
+- Fonts and typography: Segoe UI Variable and system fallbacks preserve the existing Windows-first hierarchy. Weight, line height, truncation, and small control labels remain readable in both themes.
+- Spacing and layout rhythm: floating panels use a consistent 12 pixel outer gap, 18 to 22 pixel radii, and aligned internal spacing. No persistent controls are cropped at 1280 × 720 or 1484 × 921.
+- Colors and visual tokens: neutral Glass surfaces, light inner edges, depth shadows, and the `#305EEB` XGEN accent match the source material principles. Light and dark variants were captured and inspected.
+- Image quality and asset fidelity: the source does not require product imagery. Existing Fluent UI icons are retained; no substitute CSS drawings, custom SVGs, or placeholder imagery were introduced.
+- Copy and content: existing XGEN Side navigation, provider, model, mode, Agent, and settings copy is preserved.
 
-### Follow-up Polish
+## Findings
 
-- P3: connect the Overview workspace panel to an actual Electron tab thumbnail and live action stream when the native capture pipeline is available.
+No actionable P0, P1, or P2 findings remain.
 
-## Settings
+## Comparison History
 
-### Evidence
+### Iteration 1
 
-- Source visual truth: `C:\Users\USER\AppData\Local\Temp\codex-clipboard-948ac7e8-1c66-45f4-ac11-198e1fa0acd6.png`
-- Implementation screenshot: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\settings-general-dark.png`
-- Skills focused state: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\settings-skills-dark.png`
-- Light mode MCP state: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\settings-mcp-light.png`
-- Full-view comparison: `C:\DOC_DMZ\daisy\xgen-browser\artifacts\settings-reference-comparison.png`
-- Source pixels: 1718 × 1194
-- Implementation pixels: 1718 × 1194
-- CSS viewport: 1718 × 1194 at device scale factor 1
-- Responsive check: 1024 × 768 with no horizontal document overflow
-- State: Windows desktop settings, left settings navigation open, dark General page for the full comparison
-- Normalization: source and implementation use identical pixel dimensions and are placed side by side without resizing. The source includes operating-system and application menu chrome, while the renderer preview comparison evaluates the app-owned settings panel and content region.
+- Finding: P2 Agent Composer overflow in the 348 pixel right panel.
+- Evidence: `artifacts/liquid-glass-browser-dark.png` showed the Mode control crossing the panel's left boundary.
+- Fix: removed attachment and voice controls from the constrained page Composer, tightened the Mode, Provider, and Model widths, and aligned the remaining options within the input surface.
+- Post-fix evidence: `artifacts/liquid-glass-browser-dark-final.png` shows all controls contained inside the panel.
 
-### Findings
+### Iteration 2
 
-No actionable P0, P1, or P2 differences remain in the app-owned settings experience.
+- Verification: the final 1280 × 720 home capture, dark browser capture, light home capture, and settings capture show no overflow, clipped persistent controls, broken text wrapping, or contrast regressions.
+- Interactions tested: light and dark theme switching, opening a browser session, opening the XGEN Side Agent panel, and opening Settings.
+- Console check: the running Electron development process reported the expected Vite hot update and no renderer error.
 
-- The reference exposes a much larger product-wide settings inventory. XGEN Side intentionally limits the implemented navigation to General, AI Providers, MCP, Skills, and Local data, matching the requested scope rather than copying unrelated ChatGPT settings.
-- The reference left rail is slightly wider. XGEN Side retains its existing 260 pixel panel width so switching between sessions and settings does not move the main content boundary.
-- The Skills screen has no direct reference state. It reuses the verified settings typography, row height, card border, selection state, and toggle treatment while introducing domain-group disclosure controls.
+## Follow-up Polish
 
-### Required Fidelity Surfaces
+- P3: Windows Mica and macOS Vibrancy are native compositor effects and are not visible in the renderer-only CDP screenshots. The CSS fallback is visible and verified; native material should also be checked on packaged Windows 11 and macOS builds before release.
 
-- Fonts and typography: the existing Inter, Pretendard, and Segoe UI stack preserves the reference's compact Windows hierarchy. Heading, section, row, metadata, and control labels remain readable without clipping.
-- Spacing and layout rhythm: the implementation matches the reference's narrow navigation and centered detail column. Groups use consistent 70 to 78 pixel rows, 16 pixel radii, restrained borders, and clear vertical section gaps.
-- Colors and visual tokens: dark and light modes were checked. `#305EEB` remains the sole product accent for selected navigation, focus rings, enabled toggles, and connected states.
-- Image quality and asset fidelity: the settings reference contains no content imagery requiring generation. Microsoft Fluent System Icons are used for navigation, search, tools, security, and disclosure controls.
-- Copy and content: navigation and settings copy are specific to XGEN Side. Provider, MCP, Skills, and local-data descriptions state their actual local execution boundaries.
-
-### Interaction Evidence
-
-- Entering Settings replaces the session navigation with settings navigation and provides an app-back control.
-- General, AI Providers, MCP, Skills, and Local data sections switch without navigation or layout errors.
-- The settings search filters left-navigation destinations.
-- Skills search filters domains and skills. Search for `notion` exposed only the Notion group.
-- Skill domains expand and collapse. Individual skill toggles update the active count.
-- MCP server toggles update independently; Local Files was enabled during the interaction check.
-- General, MCP, and Skill enablement values are saved through typed IPC to the local versioned settings store.
-- Dark and light themes render the settings rail, cards, rows, badges, and toggles consistently.
-- The 1024 × 768 responsive check produced no horizontal document overflow.
-- Browser console inspection found zero errors.
-
-### Comparison History
-
-- Initial settings implementation: matched the reference's two-region structure and added XGEN-specific sections.
-- Interaction pass: verified navigation, domain disclosure, skill filtering, skill toggles, MCP toggles, and theme switching. The search input was cleared and the full domain list was recaptured after the focused Notion state.
-- Final visual pass: the equal-size side-by-side comparison showed no remaining P0, P1, or P2 differences in app-owned layout, type, color, controls, or content hierarchy.
-
-### Follow-up Polish
-
-- P3: replace domain initials with downloaded site favicons when the browser asset pipeline is connected.
-- P3: make the MCP server-add button open a validated local-server form.
+## Final Result
 
 final result: passed
