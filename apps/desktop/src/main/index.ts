@@ -50,7 +50,7 @@ async function createWindow(): Promise<void> {
     height: 960,
     minWidth: 1040,
     minHeight: 700,
-    backgroundColor: '#0b0d10',
+    backgroundColor: '#00000000',
     title: 'XGEN Side',
     autoHideMenuBar: true,
     webPreferences: {
@@ -60,6 +60,7 @@ async function createWindow(): Promise<void> {
       sandbox: true,
     },
   });
+  configureWindowMaterial(mainWindow);
   mainWindow.setMenuBarVisibility(false);
 
   workspace = new BrowserWorkspace(mainWindow, (tabs) => {
@@ -78,6 +79,21 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
   await workspace.createTab();
+}
+
+function configureWindowMaterial(window: BrowserWindow): void {
+  if (process.platform === 'win32') {
+    try {
+      window.setBackgroundMaterial('mica');
+    } catch {
+      // Older Windows versions keep the renderer's opaque fallback surface.
+    }
+    return;
+  }
+
+  if (process.platform === 'darwin') {
+    window.setVibrancy('under-window');
+  }
 }
 
 function configureSessionSecurity(): void {
