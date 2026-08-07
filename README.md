@@ -1,22 +1,22 @@
 # XGEN Side
 
-Windows에서 로컬로 실행되는 Skill-first AI 브라우저입니다.
+A skill-first AI browser that runs locally on Windows.
 
-XGEN Side는 일반 채팅, 웹 검색, 실제 브라우저 조작을 하나의 데스크톱 앱 안에서 연결합니다. 사용자의 요청은 먼저 Skill Router를 통과하며, 선택된 Skill이 허용한 도구와 브라우저 동작만 실행됩니다.
+XGEN Side brings general chat, web search, and real browser automation together in one desktop application. Every request passes through the Skill Router first, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
 
-> 현재 상태: 초기 Windows 데스크톱 프로토타입. 핵심 UI, 로컬 Provider 실행, Skill Router, Browser Agent Overview와 로컬 실행 기록을 구현하고 있습니다.
+> Current status: early Windows desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
 
-## 제품 구조
+## Product layout
 
-- 왼쪽 패널: 채팅과 브라우저 세션을 한 목록에서 관리
-- 중앙 화면: 일반 AI 채팅 또는 실제 브라우저 탭
-- 오른쪽 패널: 현재 페이지를 대상으로 질문하고 작업하는 XGEN Side Agent
-- Browser Agent Overview: 일반 채팅에서 브라우저 작업이 필요할 때 선택된 Skill, 실행 단계, 대상 사이트와 허용된 동작을 표시
-- 라이트·다크 모드와 XGEN 포인트 컬러 `#305EEB`
+- Left panel: manage chat and browser sessions in one unified list
+- Center workspace: switch between general AI chat and real browser tabs
+- Right panel: ask questions and run tasks against the currently open page
+- Browser Agent Overview: when a chat request requires browser work, display the selected skills, execution steps, target site, and permitted actions
+- Light and dark themes with the XGEN accent color `#305EEB`
 
-## Skill-first 실행
+## Skill-first execution
 
-모든 Agent 요청은 Skill Router에서 실행 계획으로 변환됩니다.
+Every agent request is converted into an execution plan by the Skill Router.
 
 ```text
 User request
@@ -36,48 +36,48 @@ Command broker + Browser bridge
 Local run store
 ```
 
-- 브라우저 권한은 `default: deny`에서 시작합니다.
-- 선택된 Skill이 요구한 action category만 실행 시점에 허용합니다.
-- 필요한 Skill이 비활성화되어 있으면 Provider나 브라우저를 실행하기 전에 차단합니다.
-- Skill 선택과 실행 이벤트는 로컬 세션 기록에 저장됩니다.
+- Browser permissions start with `default: deny`.
+- Only the action categories required by the selected skills are allowed at runtime.
+- If a required skill is disabled, execution is blocked before the provider or browser starts.
+- Skill routing decisions and execution events are stored in the local session history.
 
-## Provider
+## Providers
 
-XGEN Side는 별도의 API 키를 강제하지 않고 사용자가 로컬에서 인증한 CLI Provider를 사용할 수 있도록 설계했습니다.
+XGEN Side is designed to use CLI providers authenticated on the user's machine without requiring a separate API key.
 
-- OpenAI: Codex CLI 인증과 구독 환경
-- Anthropic: Claude Code CLI 인증과 구독 환경
-- Provider와 모델은 Settings에서 등록하고 채팅 입력창 안에서 선택
-- Provider별 실행 차이는 공통 adapter 계약으로 정규화
+- OpenAI: Codex CLI authentication and subscription environment
+- Anthropic: Claude Code CLI authentication and subscription environment
+- Providers are registered in Settings; the provider and model are selected inside the chat composer
+- Provider-specific behavior is normalized behind a shared adapter contract
 
-XGEN Side는 계정 비밀번호나 구독 토큰을 자체 저장하지 않습니다. 실제 인증은 각 Provider의 공식 CLI가 담당합니다.
+XGEN Side does not store account passwords or subscription tokens. Authentication remains the responsibility of each provider's official CLI.
 
-## 로컬 실행과 보안
+## Local execution and security
 
-- Windows PowerShell을 기본 명령 셸로 사용
-- 명령어를 직접 실행하지 않고 Command Broker의 정책 판정을 거침
-- 읽기 전용 명령, 승인 필요 명령, 거부 명령을 분리
-- 실행 요청, Skill route, 승인 결과, 출력과 오류를 로컬 파일에 기록
-- Browser bridge는 선택된 Skill이 브라우저를 요구할 때만 Provider에 연결
-- 삭제, 업로드, 다운로드, 외부 상태 변경은 기본적으로 허용하지 않음
+- Uses Windows PowerShell as the default command shell
+- Routes commands through the Command Broker instead of executing them directly
+- Separates read-only commands, approval-required commands, and denied commands
+- Records execution requests, skill routes, approval results, output, and errors in local files
+- Attaches the Browser Bridge only when a selected skill requires browser access
+- Denies deletion, upload, download, and external state changes by default
 
-## 시작하기
+## Getting started
 
-### 요구 사항
+### Requirements
 
 - Windows 11
-- Node.js 24 이상
-- pnpm 11.1.3 이상
-- 사용하려는 Provider에 따라 설치 및 로그인된 Codex CLI 또는 Claude Code CLI
+- Node.js 24 or later
+- pnpm 11.1.3 or later
+- An installed and authenticated Codex CLI or Claude Code CLI, depending on the providers you want to use
 
-### 설치와 실행
+### Install and run
 
 ```powershell
 pnpm install
 pnpm dev:xgen-side
 ```
 
-### 검증
+### Validate
 
 ```powershell
 pnpm typecheck:xgen-side
@@ -85,44 +85,44 @@ pnpm test:xgen-side
 pnpm build:xgen-side
 ```
 
-GitHub Actions는 Windows에서 위 세 검증만 실행합니다. 원본 프로젝트의 npm 배포, GitHub Release, Linux/macOS 바이너리 빌드는 자동 실행하지 않습니다.
+GitHub Actions runs only these three checks on Windows. It does not automatically run the upstream npm publishing pipeline, create GitHub Releases, or build Linux and macOS binaries.
 
-## 저장소 구조
+## Repository structure
 
 ```text
-apps/desktop/                XGEN Side Electron 앱
-  src/main/                  Provider, Skill, 정책, 브라우저, 로컬 저장소
-  src/preload/               타입이 지정된 IPC bridge
-  src/renderer/              Chat, Browser, Settings, Overview UI
-cli/                         내장 agent-browser 엔진
-skill-data/                  엔진용 Skill과 참고 자료
-docs/xgen-side/              XGEN Side 아키텍처 문서
-scripts/xgen-side.mjs        데스크톱 개발·검증 명령 진입점
+apps/desktop/                XGEN Side Electron application
+  src/main/                  Providers, skills, policies, browser, local storage
+  src/preload/               Typed IPC bridge
+  src/renderer/              Chat, browser, settings, and Overview UI
+cli/                         Embedded agent-browser engine
+skill-data/                  Engine skills and supporting references
+docs/xgen-side/              XGEN Side architecture documentation
+scripts/xgen-side.mjs        Desktop development and validation entry point
 ```
 
-더 자세한 내용은 [XGEN Side 개요](XGEN_SIDE.md)와 [아키텍처 문서](docs/xgen-side/architecture.md)를 참고하세요.
+See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs/xgen-side/architecture.md) for more details.
 
-## 현재 구현 범위
+## Current implementation
 
-- [x] Windows Electron 앱 셸
-- [x] 일반 채팅과 브라우저 세션 UI
-- [x] 좌우 패널 열기·닫기
-- [x] 라이트·다크 테마
-- [x] Codex CLI와 Claude Code CLI adapter
-- [x] Provider·MCP·도메인별 Skill 설정
-- [x] Skill Router와 최소 권한 Browser policy
+- [x] Windows Electron application shell
+- [x] General chat and browser session UI
+- [x] Collapsible left and right panels
+- [x] Light and dark themes
+- [x] Codex CLI and Claude Code CLI adapters
+- [x] Provider, MCP, and domain-based skill settings
+- [x] Skill Router and least-privilege browser policy
 - [x] Browser Agent Overview
-- [x] 로컬 실행 기록
-- [ ] Overview와 실제 Electron 탭의 라이브 화면 연결
-- [ ] 승인 UI와 실시간 command stream
-- [ ] Windows 설치 패키지와 자동 업데이트
+- [x] Local run history
+- [ ] Live Electron tab rendering inside the Overview
+- [ ] Approval UI and real-time command stream
+- [ ] Windows installer and automatic updates
 
 ## Upstream
 
-브라우저 자동화 엔진은 Vercel Labs의 [agent-browser](https://github.com/vercel-labs/agent-browser)를 기반으로 합니다. 원본 엔진은 이 저장소에서 XGEN Side가 사용할 수 있는 하나의 로컬 도구로 취급합니다.
+The browser automation engine is based on Vercel Labs' [agent-browser](https://github.com/vercel-labs/agent-browser). Within this repository, the upstream engine is treated as one local tool available to XGEN Side.
 
-원본 저작권과 라이선스 고지는 [LICENSE](LICENSE) 및 소스에 포함된 제3자 고지에 따라 유지됩니다. 깨끗한 XGEN Side 이력을 위해 원본 Git 커밋 기록은 저장소에 포함하지 않지만, 저작권과 오픈소스 출처는 제거하지 않습니다.
+Original copyright and license notices remain available in [LICENSE](LICENSE) and the third-party notices included in the source tree. The upstream Git commit history is not included in order to maintain a clean XGEN Side history, but its copyright and open-source attribution are preserved.
 
 ## License
 
-Apache License 2.0. 자세한 조건은 [LICENSE](LICENSE)를 확인하세요.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
