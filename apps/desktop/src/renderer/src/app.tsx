@@ -7,36 +7,48 @@ import {
   BotSparkle24Filled,
   Chat24Filled,
   Chat24Regular,
+  CheckmarkCircle24Regular,
   ChevronDown24Regular,
   ChevronRight24Regular,
+  Circle24Regular,
   Database24Regular,
   Dismiss24Regular,
   Document24Regular,
   Globe24Regular,
+  History24Regular,
   Mic24Regular,
+  Open24Regular,
   PanelLeftContract24Regular,
   PanelLeftExpand24Regular,
   PanelRightContract24Regular,
   PlugConnected24Regular,
   PuzzlePiece24Regular,
   Search24Regular,
-  Send24Filled,
   Settings24Regular,
   ShieldLock24Regular,
   Sparkle24Filled,
   TabDesktop24Regular,
   WeatherMoon24Regular,
   WeatherSunny24Regular,
+  Window24Regular,
 } from '@fluentui/react-icons';
-import { type FormEvent, type ReactElement, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type {
   AgentMode,
+  AgentRunEvent,
+  AgentRunHandle,
   AppSettings,
+  BrowserSnapshot,
   BrowserTabState,
   EngineStatus,
   LocalDataStatus,
+  LocalMarkdownFile,
   ProviderId,
   ProviderStatus,
+  ReasoningEffort,
+  SkillCatalogEntry,
   SkillRoute,
 } from '../../shared/contracts';
 
@@ -44,10 +56,7 @@ type Theme = 'light' | 'dark';
 type Surface = 'home' | 'browser' | 'settings';
 type SettingsSection = 'general' | 'providers' | 'mcp' | 'skills' | 'data';
 
-interface SkillDefinition {
-  id: string;
-  name: string;
-  description: string;
+interface SkillDefinition extends SkillCatalogEntry {
   enabled: boolean;
 }
 
@@ -73,8 +82,10 @@ interface ChatMessage {
   meta?: string;
   overview?: {
     route: SkillRoute;
-    status: 'running' | 'completed' | 'failed';
+    status: 'running' | 'completed' | 'failed' | 'cancelled';
     prompt: string;
+    activity?: string;
+    snapshots?: BrowserSnapshot[];
   };
 }
 
@@ -86,51 +97,54 @@ const initialChats: ChatSession[] = [
 ];
 
 const homeModes: Array<{ id: AgentMode; label: string }> = [
-  { id: 'chat', label: 'Chat' },
-  { id: 'search', label: 'Search' },
+  { id: 'auto', label: 'Auto' },
+  { id: 'chat', label: 'No web' },
+  { id: 'search', label: 'Research' },
+  { id: 'browser-agent', label: 'Browser work' },
 ];
 
 const pageModes: Array<{ id: AgentMode; label: string }> = [
+  { id: 'auto', label: 'Auto' },
   { id: 'page', label: 'Ask page' },
+  { id: 'search', label: 'Research' },
   { id: 'browser-agent', label: 'Browser agent' },
 ];
 
-const initialSkillDomains: SkillDomain[] = [
-  {
-    id: 'github', label: 'GitHub', host: 'github.com', accent: '#24292f', expanded: true,
-    skills: [
-      { id: 'repo-navigator', name: 'Repository navigator', description: '저장소 구조와 코드 위치를 빠르게 탐색합니다.', enabled: true },
-      { id: 'pr-review', name: 'Pull request context', description: 'PR 변경점과 리뷰 컨텍스트를 현재 페이지에서 읽습니다.', enabled: true },
-    ],
-  },
-  {
-    id: 'google-workspace', label: 'Google Workspace', host: 'docs.google.com · drive.google.com', accent: '#4285f4', expanded: false,
-    skills: [
-      { id: 'document-reader', name: 'Document reader', description: '문서의 구조와 선택 영역을 읽고 요약합니다.', enabled: true },
-      { id: 'drive-organizer', name: 'Drive organizer', description: '승인 후 파일 분류와 폴더 정리를 지원합니다.', enabled: false },
-    ],
-  },
-  {
-    id: 'notion', label: 'Notion', host: 'notion.so', accent: '#677083', expanded: false,
-    skills: [
-      { id: 'workspace-context', name: 'Workspace context', description: '현재 페이지와 연결된 워크스페이스 컨텍스트를 첨부합니다.', enabled: true },
-      { id: 'database-helper', name: 'Database helper', description: '데이터베이스 속성과 보기를 이해하고 작업을 계획합니다.', enabled: false },
-    ],
-  },
-  {
-    id: 'global', label: 'Every website', host: '모든 도메인', accent: '#305eeb', expanded: false,
-    skills: [
-      { id: 'chat-answer', name: 'Conversation', description: '브라우저나 외부 도구 없이 일반 요청에 답합니다.', enabled: true },
-      { id: 'web-research', name: 'Web research', description: '일반 웹 검색 결과를 출처와 함께 조사합니다.', enabled: true },
-      { id: 'browser-navigation', name: 'Browser navigation', description: '탭을 열고 URL로 이동하며 페이지 상태를 확인합니다.', enabled: true },
-      { id: 'data-extraction', name: 'Structured extraction', description: '페이지에서 필요한 정보를 읽어 구조화된 결과로 정리합니다.', enabled: true },
-      { id: 'page-summarizer', name: 'Page summarizer', description: '현재 페이지의 핵심 내용과 출처를 정리합니다.', enabled: true },
-      { id: 'form-guard', name: 'Form guard', description: '제출 전 입력 내용과 위험한 동작을 검토합니다.', enabled: true },
-    ],
-  },
+const reasoningOptions: Array<{ id: ReasoningEffort; label: string }> = [
+  { id: 'auto', label: 'Reasoning: Auto' },
+  { id: 'low', label: 'Fast' },
+  { id: 'medium', label: 'Balanced' },
+  { id: 'high', label: 'Deep' },
+  { id: 'xhigh', label: 'Very Deep' },
 ];
 
 const initialPreferences: AppSettings['general'] = { guard: true, localLogs: true, compact: false };
+
+const mcpDefinitions: McpDefinition[] = [
+  { id: 'browser', name: 'XGEN Browser', command: 'agent-browser mcp --tools core,tabs', transport: 'stdio', tools: ['tabs', 'open', 'snapshot', 'click', 'fill', 'read'], permissions: ['Loopback CDP only', 'Session action policy', 'No upload or download'], status: 'Connected' },
+  { id: 'xgen', name: 'XGEN Tools', command: 'xgen tools mcp --scope local', transport: 'stdio', tools: ['task_status', 'local_artifacts'], permissions: ['Local workspace only', 'Redacted run metadata'], status: 'Connected' },
+  { id: 'filesystem', name: 'Local Files', command: 'filesystem --roots selected', transport: 'stdio', tools: ['read_file', 'list_directory'], permissions: ['Selected roots only', 'Writes require approval'], status: 'Needs scope' },
+];
+
+function groupSkillCatalog(catalog: SkillCatalogEntry[], enabled: Record<string, boolean>): SkillDomain[] {
+  const accents: Record<string, string> = { Core: '#305eeb', Research: '#0f766e', Browser: '#7c3aed', Safety: '#b45309' };
+  const categories = new Map<string, SkillDomain>();
+  for (const skill of catalog) {
+    const id = skill.category.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const current = categories.get(id) ?? {
+      id,
+      label: skill.category,
+      host: skill.domain,
+      accent: accents[skill.category] ?? '#305eeb',
+      expanded: true,
+      skills: [],
+    };
+    if (!current.host.split(' · ').includes(skill.domain)) current.host = `${current.host} · ${skill.domain}`;
+    current.skills.push({ ...skill, enabled: enabled[skill.settingKey] ?? skill.enabledByDefault });
+    categories.set(id, current);
+  }
+  return [...categories.values()];
+}
 
 export function App(): ReactElement {
   const [tabs, setTabs] = useState<BrowserTabState[]>([]);
@@ -140,10 +154,12 @@ export function App(): ReactElement {
   const [rightOpen, setRightOpen] = useState(false);
   const [address, setAddress] = useState('');
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [authenticatingProviderId, setAuthenticatingProviderId] = useState<ProviderId | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>('codex');
   const [model, setModel] = useState('gpt-5.6-sol');
-  const [homeMode, setHomeMode] = useState<AgentMode>('chat');
-  const [pageMode, setPageMode] = useState<AgentMode>('page');
+  const [homeMode, setHomeMode] = useState<AgentMode>('auto');
+  const [pageMode, setPageMode] = useState<AgentMode>('auto');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto');
   const [homePrompt, setHomePrompt] = useState('');
   const [pagePrompt, setPagePrompt] = useState('');
   const [homeBusy, setHomeBusy] = useState(false);
@@ -164,13 +180,18 @@ export function App(): ReactElement {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [settingsSearch, setSettingsSearch] = useState('');
   const [skillSearch, setSkillSearch] = useState('');
-  const [skillDomains, setSkillDomains] = useState(initialSkillDomains);
+  const [skillDomains, setSkillDomains] = useState<SkillDomain[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState<Record<string, boolean>>({ browser: true, xgen: true, filesystem: false });
   const [preferences, setPreferences] = useState(initialPreferences);
   const [settingsReady, setSettingsReady] = useState(false);
+  const homeRunRef = useRef<AgentRunHandle | null>(null);
+  const pageRunRef = useRef<AgentRunHandle | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.active), [tabs]);
   const selectedProvider = providers.find((provider) => provider.id === providerId);
-  const leftWidth = leftOpen ? 260 : 0;
+  const homeOverview = [...homeMessages].reverse().find((message) => message.overview)?.overview;
+  const leftWidth = leftOpen ? 300 : 0;
+  const homeSnapshotVisible = surface === 'home' && Boolean(homeOverview?.route.browserVisible);
+  const homeDockWidth = homeSnapshotVisible ? 540 : 0;
   const rightWidth = surface === 'browser' && rightOpen ? 372 : 0;
 
   useEffect(() => {
@@ -178,24 +199,18 @@ export function App(): ReactElement {
     void window.xgenSide.engine.status().then(setEngine);
     void refreshProviders();
     void window.xgenSide.localData.status().then(setLocalData);
-    void window.xgenSide.settings.load().then((saved) => {
+    void Promise.all([window.xgenSide.settings.load(), window.xgenSide.skills.list()]).then(([saved, catalog]) => {
       setPreferences(saved.general);
       setMcpEnabled(saved.mcpEnabled);
-      setSkillDomains((current) => current.map((domain) => ({
-        ...domain,
-        skills: domain.skills.map((skill) => ({
-          ...skill,
-          enabled: saved.skillEnabled[`${domain.id}:${skill.id}`] ?? skill.enabled,
-        })),
-      })));
+      setSkillDomains(groupSkillCatalog(catalog, saved.skillEnabled));
       setSettingsReady(true);
-    }).catch(() => setSettingsReady(true));
+    }).catch(() => undefined);
     return window.xgenSide.browser.onTabsChanged(setTabs);
   }, []);
 
   useEffect(() => {
     if (!settingsReady) return;
-    const skillEnabled = Object.fromEntries(skillDomains.flatMap((domain) => domain.skills.map((skill) => [`${domain.id}:${skill.id}`, skill.enabled])));
+    const skillEnabled = Object.fromEntries(skillDomains.flatMap((domain) => domain.skills.map((skill) => [skill.settingKey, skill.enabled])));
     const timer = window.setTimeout(() => {
       void window.xgenSide.settings.save({ schemaVersion: 1, general: preferences, mcpEnabled, skillEnabled });
     }, 180);
@@ -210,10 +225,38 @@ export function App(): ReactElement {
       leftWidth,
       rightWidth,
       chromeHeight: 76,
+      placement: 'workspace',
+      dockInset: 10,
     });
   }, [leftWidth, rightWidth, surface]);
 
-  async function refreshProviders(): Promise<void> {
+  useEffect(() => {
+    if (!authenticatingProviderId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await refreshProviders();
+        if (cancelled) return;
+        const connected = next.find((provider) => provider.id === authenticatingProviderId && provider.authenticated);
+        if (connected) {
+          setSettingsMessage(`${connected.label} 연결이 완료되었습니다.`);
+          setAuthenticatingProviderId(null);
+          return;
+        }
+      } catch {
+        // A transient status failure should not interrupt login completion polling.
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), 2_000);
+    };
+    timer = window.setTimeout(() => void poll(), 750);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [authenticatingProviderId]);
+
+  async function refreshProviders(): Promise<ProviderStatus[]> {
     const next = await window.xgenSide.providers.list();
     setProviders(next);
     const current = next.find((provider) => provider.id === providerId) ?? next[0];
@@ -221,6 +264,7 @@ export function App(): ReactElement {
       setProviderId(current.id);
       setModel((value) => current.models.some((item) => item.id === value) ? value : (current.models[0]?.id ?? ''));
     }
+    return next;
   }
 
   function changeProvider(nextId: ProviderId): void {
@@ -271,44 +315,65 @@ export function App(): ReactElement {
       providerId,
       model,
       mode: homeMode,
+      reasoningEffort,
       prompt: value,
       history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
     };
-    const overviewId = crypto.randomUUID();
+    let overviewId: string | undefined;
+    const responseId = crypto.randomUUID();
+    let activeRunId: string | undefined;
     let route: SkillRoute | undefined;
     try {
       const routed = await window.xgenSide.skills.route(request);
       route = routed;
-      if (routed.browserRequired || routed.blockedReason) {
-        setHomeMessages((current) => [...current, {
-          id: overviewId,
-          role: 'assistant',
-          content: '',
-          overview: { route: routed, status: 'running', prompt: value },
-        }]);
-      }
-      const result = await window.xgenSide.agent.run(request);
-      if (routed.browserRequired || routed.blockedReason) {
-        setHomeMessages((current) => current.map((message) => message.id === overviewId ? {
-          ...message,
-          overview: { route: result.route ?? routed, status: result.state === 'completed' ? 'completed' : 'failed', prompt: value },
-        } : message));
-      }
-      setHomeMessages((current) => [...current, {
-        id: crypto.randomUUID(),
+      const showOverview = routed.browserVisible || routed.skills.some((skill) => skill.id !== 'xgen.conversation');
+      overviewId = showOverview ? crypto.randomUUID() : undefined;
+      const overviewMessages: ChatMessage[] = overviewId ? [{
+        id: overviewId,
         role: 'assistant',
-        content: result.answer || result.error || '응답이 없습니다.',
-        meta: `로컬 기록 · ${result.sessionId.slice(0, 8)}`,
-      }]);
+        content: '',
+        overview: { route: routed, status: 'running', prompt: value },
+      }] : [];
+      setHomeMessages((current) => [...current,
+        ...overviewMessages,
+        { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' },
+      ]);
+      const handle = window.xgenSide.agent.start(request, (runEvent) => {
+        setHomeMessages((current) => applyRunEvent(current, responseId, overviewId, runEvent));
+      });
+      homeRunRef.current = handle;
+      activeRunId = handle.id;
+      const result = await handle.result;
+      setHomeMessages((current) => current.map((message) => overviewId && message.id === overviewId ? {
+        ...message,
+        overview: {
+          ...message.overview,
+          route: result.route ?? routed,
+          status: result.state === 'completed' ? 'completed' : result.state === 'cancelled' ? 'cancelled' : 'failed',
+          prompt: value,
+        },
+      } : message));
+      setHomeMessages((current) => current.map((message) => message.id === responseId ? {
+        ...message,
+        content: result.answer || message.content || result.error || '응답이 없습니다.',
+        meta: `${runStateLabel(result.state)} · 로컬 기록 ${result.sessionId.slice(0, 8)}`,
+      } : message));
     } catch (error) {
-      if (route?.browserRequired || route?.blockedReason) {
-        setHomeMessages((current) => current.map((message) => message.id === overviewId && message.overview ? {
+      if (route) {
+        setHomeMessages((current) => current.map((message) => overviewId && message.id === overviewId && message.overview ? {
           ...message,
           overview: { ...message.overview, status: 'failed' },
         } : message));
       }
-      setHomeMessages((current) => [...current, errorMessage(error)]);
+      setHomeMessages((current) => current.some((message) => message.id === responseId)
+        ? current.map((message) => message.id === responseId ? {
+          ...message,
+          content: error instanceof Error ? error.message : String(error),
+          meta: '실행 실패',
+        } : message)
+        : [...current, errorMessage(error)]);
     } finally {
+      if (homeRunRef.current?.id === activeRunId) homeRunRef.current = null;
       setHomeBusy(false);
     }
   }
@@ -320,34 +385,76 @@ export function App(): ReactElement {
     setPageMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }]);
     setPagePrompt('');
     setPageBusy(true);
+    const responseId = crypto.randomUUID();
+    let activeRunId: string | undefined;
     try {
       const pageContext = await window.xgenSide.browser.getPageContext();
       if (!pageContext) throw new Error('현재 페이지를 읽을 수 없습니다.');
-      const result = await window.xgenSide.agent.run({
+      setPageMessages((current) => [...current, { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' }]);
+      const handle = window.xgenSide.agent.start({
         providerId,
         model,
         mode: pageMode,
+        reasoningEffort,
         prompt: value,
         pageContext,
         history: pageMessages.map(({ role, content }) => ({ role, content })),
+      }, (runEvent) => {
+        setPageMessages((current) => applyRunEvent(current, responseId, undefined, runEvent));
       });
-      setPageMessages((current) => [...current, {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: result.answer || result.error || '응답이 없습니다.',
-        meta: `로컬 기록 · ${result.sessionId.slice(0, 8)}`,
-      }]);
+      pageRunRef.current = handle;
+      activeRunId = handle.id;
+      const result = await handle.result;
+      setPageMessages((current) => current.map((message) => message.id === responseId ? {
+        ...message,
+        content: result.answer || message.content || result.error || '응답이 없습니다.',
+        meta: `${runStateLabel(result.state)} · 로컬 기록 ${result.sessionId.slice(0, 8)}`,
+      } : message));
     } catch (error) {
-      setPageMessages((current) => [...current, errorMessage(error)]);
+      setPageMessages((current) => current.some((message) => message.id === responseId)
+        ? current.map((message) => message.id === responseId ? {
+          ...message,
+          content: error instanceof Error ? error.message : String(error),
+          meta: '실행 실패',
+        } : message)
+        : [...current, errorMessage(error)]);
     } finally {
+      if (pageRunRef.current?.id === activeRunId) pageRunRef.current = null;
       setPageBusy(false);
     }
   }
 
+  async function cancelHomeRun(): Promise<void> {
+    const handle = homeRunRef.current;
+    if (!handle || !await handle.cancel()) return;
+    homeRunRef.current = null;
+    setHomeBusy(false);
+    setHomeMessages((current) => current.map((message) => message.overview?.status === 'running'
+      ? { ...message, overview: { ...message.overview, status: 'cancelled', activity: '사용자가 실행을 중지했습니다' } }
+      : message));
+  }
+
+  async function cancelPageRun(): Promise<void> {
+    const handle = pageRunRef.current;
+    if (!handle || !await handle.cancel()) return;
+    pageRunRef.current = null;
+    setPageBusy(false);
+    setPageMessages((current) => current.map((message) => message.meta?.includes('실행')
+      ? { ...message, meta: '중지됨' }
+      : message));
+  }
+
   async function connectProvider(id: ProviderId): Promise<void> {
-    const result = await window.xgenSide.providers.authenticate(id);
-    setSettingsMessage(result.message);
-    if (result.launched) setTimeout(() => void refreshProviders(), 4_000);
+    try {
+      const result = await window.xgenSide.providers.authenticate(id);
+      setSettingsMessage(result.message);
+      if (result.launched) {
+        setAuthenticatingProviderId(id);
+        setSettingsMessage(`${result.message} 로그인 완료를 자동으로 확인합니다.`);
+      }
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : String(error));
+    }
   }
 
   return (
@@ -380,6 +487,7 @@ export function App(): ReactElement {
       {surface === 'home' && (
         <HomeSurface
           busy={homeBusy}
+          chats={chats}
           leftWidth={leftWidth}
           messages={homeMessages}
           mode={homeMode}
@@ -388,12 +496,22 @@ export function App(): ReactElement {
           onChangeModel={setModel}
           onChangePrompt={setHomePrompt}
           onChangeProvider={changeProvider}
+          onChangeReasoning={setReasoningEffort}
+          onCancel={() => void cancelHomeRun()}
+          onOpenBrowser={(id) => void openBrowserTab(id)}
+          onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
           onSubmit={(event) => void sendHomeMessage(event)}
           prompt={homePrompt}
           providerId={providerId}
           providers={providers}
+          reasoningEffort={reasoningEffort}
+          rightWidth={homeDockWidth}
           selectedProvider={selectedProvider}
+          tabs={tabs}
         />
+      )}
+      {surface === 'home' && homeOverview?.route.browserVisible && (
+        <BrowserSnapshotRail busy={homeBusy} overview={homeOverview} />
       )}
       {surface === 'settings' && (
         <SettingsSurface
@@ -446,11 +564,14 @@ export function App(): ReactElement {
           onChangeModel={setModel}
           onChangePrompt={setPagePrompt}
           onChangeProvider={changeProvider}
+          onChangeReasoning={setReasoningEffort}
+          onCancel={() => void cancelPageRun()}
           onClose={() => setRightOpen(false)}
           onSubmit={(event) => void sendPageMessage(event)}
           prompt={pagePrompt}
           providerId={providerId}
           providers={providers}
+          reasoningEffort={reasoningEffort}
           selectedProvider={selectedProvider}
         />
       )}
@@ -535,11 +656,13 @@ function LeftPanel(props: LeftPanelProps): ReactElement {
           <div className="nav-section-title"><span>Browser tabs</span><button className="icon-button compact" onClick={props.onCreateBrowser} aria-label="새 브라우저 탭"><Add24Regular /></button></div>
           <div className="nav-list">
             {props.tabs.map((tab) => (
-              <button className={props.surface === 'browser' && tab.active ? 'nav-row active' : 'nav-row'} key={tab.id} onClick={() => props.onOpenBrowser(tab.id)}>
-                {tab.url.includes('google.com') ? <Globe24Regular /> : <TabDesktop24Regular />}
-                <span className="nav-copy"><strong>{tab.loading ? '불러오는 중' : tab.title || '새 탭'}</strong><small>{formatHost(tab.url)}</small></span>
-                <span className="row-close" role="button" tabIndex={0} aria-label="브라우저 탭 닫기" onClick={(event) => { event.stopPropagation(); props.onCloseBrowser(tab.id); }}><Dismiss24Regular /></span>
-              </button>
+              <div className={props.surface === 'browser' && tab.active ? 'nav-row active' : 'nav-row'} key={tab.id}>
+                <button className="nav-row-open" onClick={() => props.onOpenBrowser(tab.id)} aria-label={tab.title || '새 브라우저 탭'}>
+                  {tab.url.includes('google.com') ? <Globe24Regular /> : <TabDesktop24Regular />}
+                  <span className="nav-copy"><strong>{tab.loading ? '불러오는 중' : tab.title || '새 탭'}</strong><small>{formatHost(tab.url)}</small></span>
+                </button>
+                <button className="row-close" aria-label="브라우저 탭 닫기" onClick={() => props.onCloseBrowser(tab.id)}><Dismiss24Regular /></button>
+              </div>
             ))}
           </div>
         </section>
@@ -564,32 +687,94 @@ interface ConversationSurfaceProps {
   onChangeModel(value: string): void;
   onChangePrompt(value: string): void;
   onChangeProvider(value: ProviderId): void;
+  onChangeReasoning(value: ReasoningEffort): void;
+  onCancel(): void;
   onSubmit(event: FormEvent): void;
   prompt: string;
   providerId: ProviderId;
   providers: ProviderStatus[];
+  reasoningEffort: ReasoningEffort;
   selectedProvider?: ProviderStatus;
 }
 
-function HomeSurface(props: ConversationSurfaceProps & { leftWidth: number }): ReactElement {
+function HomeSurface(props: ConversationSurfaceProps & {
+  chats: ChatSession[];
+  leftWidth: number;
+  onOpenBrowser(id: string): void;
+  onOpenChat(id: string): void;
+  rightWidth: number;
+  tabs: BrowserTabState[];
+}): ReactElement {
+  const [recentView, setRecentView] = useState<'chats' | 'browsers'>('chats');
   const hasOverview = props.messages.some((message) => message.overview);
+  const composer = <Composer {...props} modes={homeModes} placeholder="AI에게 작업을 요청하거나 웹 검색을 시작하세요" />;
   return (
-    <section className="home-surface" style={{ left: props.leftWidth }}>
-      <header className="home-header"><span>New chat</span><button className="profile-button" aria-label="프로필">XS</button></header>
+    <section className="home-surface" style={{ left: props.leftWidth, right: props.rightWidth }}>
+      <header className="home-header">
+        <h1>{props.messages.length ? 'Chat' : 'New chat'}</h1>
+        <button className="profile-button" aria-label="프로필">XS</button>
+      </header>
       <div className={props.messages.length ? 'home-content has-messages' : 'home-content'}>
         {props.messages.length ? (
-          <div className={hasOverview ? 'conversation-stream overview-stream' : 'conversation-stream'}>{props.messages.map((message) => <MessageBubble key={message.id} message={message} />)}</div>
+          <>
+            <div className={hasOverview ? 'conversation-stream overview-stream' : 'conversation-stream'} role="region" tabIndex={0} aria-label="대화 내용">
+              {props.messages.map((message) => <MessageBubble key={message.id} message={message} />)}
+            </div>
+            {composer}
+          </>
         ) : (
-          <div className="home-hero">
-            <span className="hero-icon"><Sparkle24Filled /></span>
-            <h1>무엇을 도와드릴까요?</h1>
-            <p>Chat은 대화만, Search는 출처가 있는 웹 리서치만 실행합니다.</p>
+          <div className="home-start">
+            <div className="home-hero">
+              <h1>무엇을 도와드릴까요?</h1>
+              <p>대화로 정리하거나, 브라우저 검색으로 최신 정보를 찾아보세요.</p>
+            </div>
+            {composer}
+            <section className="recent-work" aria-label="최근 작업">
+              <header className="recent-work-header">
+                <div className="recent-tabs" role="tablist" aria-label="최근 작업 종류">
+                  <button className={recentView === 'chats' ? 'active' : ''} onClick={() => setRecentView('chats')} role="tab" aria-selected={recentView === 'chats'}>Chats</button>
+                  <button className={recentView === 'browsers' ? 'active' : ''} onClick={() => setRecentView('browsers')} role="tab" aria-selected={recentView === 'browsers'}>Browsers</button>
+                </div>
+                <span><History24Regular /> 최근 작업</span>
+              </header>
+              <div className="recent-grid">
+                {recentView === 'chats'
+                  ? props.chats.slice(0, 3).map((chat, index) => (
+                    <button className="recent-card" key={chat.id} onClick={() => props.onOpenChat(chat.id)}>
+                      <span className="recent-card-icon"><Chat24Regular /></span>
+                      <small>{chat.time}</small>
+                      <strong>{chat.title}</strong>
+                      <p>{index === 0 ? '이어지는 대화와 실행 기록을 확인하세요.' : '최근 대화를 다시 열어 계속 작업할 수 있습니다.'}</p>
+                      <span className="recent-card-link">대화 열기 <Open24Regular /></span>
+                    </button>
+                  ))
+                  : props.tabs.slice(0, 3).map((tab) => (
+                    <button className="recent-card browser-card" key={tab.id} onClick={() => props.onOpenBrowser(tab.id)}>
+                      <span className="recent-card-icon"><Window24Regular /></span>
+                      <small>{formatHost(tab.url)}</small>
+                      <strong>{tab.title || '새 브라우저 탭'}</strong>
+                      <p>{tab.loading ? '페이지를 불러오는 중입니다.' : '최근 브라우저 작업을 이어서 진행하세요.'}</p>
+                      <span className="recent-card-link">브라우저 열기 <Open24Regular /></span>
+                    </button>
+                  ))}
+                {recentView === 'browsers' && props.tabs.length === 0 && <div className="recent-empty">아직 열린 브라우저가 없습니다.</div>}
+              </div>
+            </section>
           </div>
         )}
-        <Composer {...props} modes={homeModes} placeholder="메시지를 입력하거나 검색을 요청하세요" />
       </div>
     </section>
   );
+}
+
+interface McpDefinition {
+  id: string;
+  name: string;
+  command: string;
+  transport: string;
+  tools: string[];
+  permissions: string[];
+  status: string;
 }
 
 function BrowserChrome(props: {
@@ -632,6 +817,30 @@ function AgentPanel(props: ConversationSurfaceProps & { activeTab?: BrowserTabSt
   );
 }
 
+function BrowserSnapshotRail(props: {
+  busy: boolean;
+  overview: NonNullable<ChatMessage['overview']>;
+}): ReactElement {
+  const snapshots = props.overview.snapshots ?? [];
+  return (
+    <aside className="browser-snapshot-rail" aria-label="브라우저 작업 캡처">
+      <header className="snapshot-rail-header">
+        <div><span className={props.busy ? 'live-browser-status active' : 'live-browser-status'} /><span><strong>Browser activity</strong><small>{props.busy ? '화면이 바뀔 때 캡처합니다' : '작업 캡처 완료'}</small></span></div>
+        <span className="snapshot-mode"><Globe24Regular />Snapshots</span>
+      </header>
+      <div className="snapshot-list">
+        {snapshots.length ? snapshots.map((snapshot, index) => (
+          <article className="browser-snapshot-card" key={snapshot.id}>
+            <header><span><strong>{snapshot.title}</strong><small>{formatHost(snapshot.url)}</small></span><b>{index + 1}</b></header>
+            <img src={snapshot.imageDataUrl} alt={`${snapshot.title} 브라우저 캡처`} />
+            <footer><span>{snapshot.reason}</span><time>{new Date(snapshot.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></footer>
+          </article>
+        )) : <div className="snapshot-empty"><Window24Regular /><span><strong>첫 화면을 기다리는 중</strong><small>{props.overview.activity || props.overview.route.reason}</small></span></div>}
+      </div>
+    </aside>
+  );
+}
+
 function SettingsSurface(props: {
   activeSection: SettingsSection;
   leftWidth: number;
@@ -659,22 +868,13 @@ function SettingsSurface(props: {
     data: { eyebrow: 'Local first', title: 'Local data', description: '세션 기록과 provider 출력이 저장되는 위치를 확인합니다.' },
   };
   const copy = sectionCopy[props.activeSection];
-  const skillNeedle = props.skillSearch.trim().toLowerCase();
-  const filteredDomains = props.skillDomains.map((domain) => {
-    const domainMatches = `${domain.label} ${domain.host}`.toLowerCase().includes(skillNeedle);
-    return {
-      ...domain,
-      skills: domainMatches || !skillNeedle
-        ? domain.skills
-        : domain.skills.filter((skill) => `${skill.name} ${skill.description}`.toLowerCase().includes(skillNeedle)),
-    };
-  }).filter((domain) => domain.skills.length > 0);
+  const isWorkbench = props.activeSection === 'mcp' || props.activeSection === 'skills' || props.activeSection === 'data';
 
   return (
     <section className="settings-surface" style={{ left: props.leftWidth }}>
       <header className="settings-topbar"><span>Settings <ChevronRight24Regular /> {copy.title}</span><button className="icon-button" onClick={props.onRefresh} aria-label="상태 새로고침"><ArrowClockwise24Regular /></button></header>
-      <div className="settings-content settings-detail-scroll">
-        <div className="settings-page-heading"><span>{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div>
+      <div className={isWorkbench ? 'settings-content settings-workbench-content' : 'settings-content settings-detail-scroll'}>
+        {!isWorkbench && <div className="settings-page-heading"><span>{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div>}
         {props.message && props.activeSection === 'providers' && <div className="settings-notice">{props.message}</div>}
 
         {props.activeSection === 'general' && (
@@ -709,63 +909,150 @@ function SettingsSurface(props: {
         )}
 
         {props.activeSection === 'mcp' && (
-          <div className="settings-section-stack">
-            <div className="section-toolbar"><div><strong>Connected servers</strong><span>3개의 로컬 MCP 구성이 등록되어 있습니다.</span></div><button className="quiet-action">서버 추가</button></div>
-            <SettingsGroup title="Local MCP servers" description="활성화된 서버만 agent 실행 시 provider에 전달됩니다.">
-              <McpRow name="XGEN Browser" command="agent-browser mcp · core,tabs" status="Connected" checked={Boolean(props.mcpEnabled.browser)} onChange={(checked) => props.onSetMcpEnabled('browser', checked)} />
-              <McpRow name="XGEN Tools" command="xgen tools mcp · local" status="Connected" checked={Boolean(props.mcpEnabled.xgen)} onChange={(checked) => props.onSetMcpEnabled('xgen', checked)} />
-              <McpRow name="Local Files" command="filesystem · selected folders only" status="Needs scope" checked={Boolean(props.mcpEnabled.filesystem)} onChange={(checked) => props.onSetMcpEnabled('filesystem', checked)} />
-            </SettingsGroup>
-            <div className="settings-inline-note"><ShieldLock24Regular /><p><strong>MCP 권한은 세션마다 다시 제한됩니다.</strong><span>브라우저 쿠키, 인증 정보, 다운로드와 업로드는 기본 정책에서 차단됩니다.</span></p></div>
-          </div>
+          <McpWorkbench enabled={props.mcpEnabled} onSetEnabled={props.onSetMcpEnabled} />
         )}
 
         {props.activeSection === 'skills' && (
-          <div className="settings-section-stack">
-            <div className="skill-toolbar">
-              <label className="skill-search"><Search24Regular /><input value={props.skillSearch} onChange={(event) => props.onSkillSearch(event.target.value)} placeholder="도메인 또는 skill 검색" /></label>
-              <span>{props.skillDomains.reduce((count, domain) => count + domain.skills.filter((skill) => skill.enabled).length, 0)} active</span>
-            </div>
-            <div className="domain-list">
-              {filteredDomains.map((domain) => {
-                const open = domain.expanded || Boolean(skillNeedle);
-                return (
-                  <article className="domain-card" key={domain.id}>
-                    <button className="domain-header" onClick={() => props.onToggleSkillDomain(domain.id)} aria-expanded={open}>
-                      <span className="domain-mark" style={{ color: domain.accent, background: `${domain.accent}18` }}>{domain.label.slice(0, 1)}</span>
-                      <span className="domain-copy"><strong>{domain.label}</strong><small>{domain.host}</small></span>
-                      <span className="domain-count">{domain.skills.filter((skill) => skill.enabled).length}/{domain.skills.length}</span>
-                      <ChevronDown24Regular className={open ? 'chevron-open' : ''} />
-                    </button>
-                    {open && <div className="domain-skills">{domain.skills.map((skill) => (
-                      <SettingsRow key={skill.id} title={skill.name} description={skill.description}><Toggle checked={skill.enabled} onChange={(checked) => props.onSetSkillEnabled(domain.id, skill.id, checked)} /></SettingsRow>
-                    ))}</div>}
-                  </article>
-                );
-              })}
-              {filteredDomains.length === 0 && <div className="empty-settings">검색 결과가 없습니다.</div>}
-            </div>
-          </div>
+          <SkillWorkbench domains={props.skillDomains} search={props.skillSearch} onSearch={props.onSkillSearch} onSetEnabled={props.onSetSkillEnabled} />
         )}
 
         {props.activeSection === 'data' && (
-          <div className="settings-section-stack">
-            <section className="local-data-card settings-data-card">
-              <div><strong>Local agent store</strong><p>세션 메타데이터, 페이지 컨텍스트, provider JSONL, 오류와 실행 이벤트를 로컬에 기록합니다.</p><code>{props.localData?.root || '불러오는 중'}</code></div>
-              <button className="provider-action secondary" onClick={props.onOpenData}>폴더 열기</button>
-            </section>
-            <section className="execution-boundary">
-              <strong>Mode boundaries</strong>
-              <div><span>Chat</span><p>격리된 작업 폴더, 브라우저 컨텍스트와 파일 쓰기 도구 없음</p></div>
-              <div><span>Search</span><p>격리된 작업 폴더, 웹 검색과 출처 요청만 허용</p></div>
-              <div><span>Ask page</span><p>현재 탭 텍스트만 첨부, 브라우저 조작 없음</p></div>
-              <div><span>Browser agent</span><p>provider별 실행 가드와 로컬 agent-browser MCP 정책 적용</p></div>
-            </section>
-          </div>
+          <MemoryWorkbench localData={props.localData} onOpenData={props.onOpenData} />
         )}
       </div>
     </section>
   );
+}
+
+function SkillWorkbench(props: {
+  domains: SkillDomain[];
+  search: string;
+  onSearch(value: string): void;
+  onSetEnabled(domainId: string, skillId: string, enabled: boolean): void;
+}): ReactElement {
+  const resources = useMemo(() => props.domains.flatMap((domain) => domain.skills.map((skill) => ({ domain, skill }))).filter(({ domain, skill }) => {
+    const needle = props.search.trim().toLowerCase();
+    return !needle || `${domain.label} ${domain.host} ${skill.name} ${skill.description}`.toLowerCase().includes(needle);
+  }), [props.domains, props.search]);
+  const [selectedId, setSelectedId] = useState('xgen.web-research');
+  const selected = resources.find(({ skill }) => skill.id === selectedId) ?? resources[0];
+  useEffect(() => {
+    if (selected && !resources.some(({ skill }) => skill.id === selectedId)) setSelectedId(selected.skill.id);
+  }, [resources, selected, selectedId]);
+  return (
+    <div className="settings-workbench">
+      <aside className="resource-sidebar">
+        <header><div><strong>Skills</strong><small>{resources.length} files</small></div><Document24Regular /></header>
+        <label className="resource-search"><Search24Regular /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search skills" /></label>
+        <div className="resource-tree">
+          {props.domains.map((domain) => {
+            const skills = resources.filter((entry) => entry.domain.id === domain.id);
+            if (!skills.length) return null;
+            return <section className="resource-group" key={domain.id}><header><span>{domain.label}</span><small>{skills.length}</small></header>{skills.map(({ skill }) => {
+              const id = skill.id;
+              return <button className={selectedId === id ? 'resource-file active' : 'resource-file'} key={id} onClick={() => setSelectedId(id)}><Document24Regular /><span><strong>{skill.name}</strong><small>SKILL.md</small></span><span className={skill.enabled ? 'resource-state enabled' : 'resource-state'} /></button>;
+            })}</section>;
+          })}
+        </div>
+      </aside>
+      {selected ? <section className="resource-detail">
+        <header className="resource-detail-heading"><div><span>Skill</span><h1>{selected.skill.name}</h1><p>{selected.domain.label} · {selected.skill.domain}</p></div><Toggle checked={selected.skill.enabled} onChange={(checked) => props.onSetEnabled(selected.domain.id, selected.skill.id, checked)} /></header>
+        <div className="resource-metadata"><span><small>Runtime</small><strong>{selected.skill.runtime.kind}</strong></span><span><small>Tools</small><strong>{selected.skill.runtime.tools.length}</strong></span><span><small>Risk</small><strong>{selected.skill.permissions.risk}</strong></span></div>
+        <MarkdownDocument title={selected.skill.source} content={selected.skill.markdown} />
+      </section> : <div className="resource-empty">검색 결과가 없습니다.</div>}
+    </div>
+  );
+}
+
+function McpWorkbench(props: { enabled: Record<string, boolean>; onSetEnabled(id: string, enabled: boolean): void }): ReactElement {
+  const [selectedId, setSelectedId] = useState('browser');
+  const selected = mcpDefinitions.find((server) => server.id === selectedId) ?? mcpDefinitions[0]!;
+  return (
+    <div className="settings-workbench">
+      <aside className="resource-sidebar">
+        <header><div><strong>MCP servers</strong><small>{mcpDefinitions.length} configurations</small></div><PlugConnected24Regular /></header>
+        <div className="resource-tree mcp-resource-tree">{mcpDefinitions.map((server) => <button className={selected.id === server.id ? 'resource-file active' : 'resource-file'} key={server.id} onClick={() => setSelectedId(server.id)}><PlugConnected24Regular /><span><strong>{server.name}</strong><small>{server.transport} · {server.status}</small></span><span className={props.enabled[server.id] ? 'resource-state enabled' : 'resource-state'} /></button>)}</div>
+      </aside>
+      <section className="resource-detail">
+        <header className="resource-detail-heading"><div><span>MCP server</span><h1>{selected.name}</h1><p>{selected.command}</p></div><Toggle checked={Boolean(props.enabled[selected.id])} onChange={(checked) => props.onSetEnabled(selected.id, checked)} /></header>
+        <div className="resource-metadata"><span><small>Transport</small><strong>{selected.transport}</strong></span><span><small>Tools</small><strong>{selected.tools.length}</strong></span><span><small>Status</small><strong>{selected.status}</strong></span></div>
+        <MarkdownDocument title="MCP.md" content={mcpMarkdown(selected)} />
+      </section>
+    </div>
+  );
+}
+
+function MemoryWorkbench(props: { localData?: LocalDataStatus; onOpenData(): void }): ReactElement {
+  const [files, setFiles] = useState<LocalMarkdownFile[]>([]);
+  const [selectedPath, setSelectedPath] = useState('MEMORY.md');
+  const [content, setContent] = useState('# Browser Agent Memory\n\n불러오는 중입니다.');
+  const [dirty, setDirty] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const refresh = async (): Promise<void> => {
+    const next = await window.xgenSide.localData.listMarkdown();
+    setFiles(next);
+    if (!next.some((file) => file.relativePath === selectedPath)) setSelectedPath(next[0]?.relativePath ?? 'MEMORY.md');
+  };
+  useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    void window.xgenSide.localData.readMarkdown(selectedPath).then((value) => {
+      if (cancelled) return;
+      setContent(value);
+      setDirty(false);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedPath]);
+  const save = async (): Promise<void> => {
+    await window.xgenSide.localData.writeMarkdown(selectedPath, content);
+    setDirty(false);
+    await refresh();
+  };
+  const groups: Array<{ id: LocalMarkdownFile['category']; label: string }> = [
+    { id: 'root', label: 'Memory' },
+    { id: 'browser-history', label: 'Browser history' },
+    { id: 'task-results', label: 'Task results' },
+  ];
+  const selected = files.find((file) => file.relativePath === selectedPath);
+  return (
+    <div className="settings-workbench">
+      <aside className="resource-sidebar">
+        <header><div><strong>Memory</strong><small>Browser Agent only</small></div><Database24Regular /></header>
+        <button className="resource-folder-action" onClick={props.onOpenData}><Open24Regular />Open folder</button>
+        <div className="resource-tree">{groups.map((group) => {
+          const entries = files.filter((file) => file.category === group.id);
+          if (!entries.length) return null;
+          return <section className="resource-group" key={group.id}><header><span>{group.label}</span><small>{entries.length}</small></header>{entries.map((file) => <button className={selectedPath === file.relativePath ? 'resource-file active' : 'resource-file'} key={file.id} onClick={() => setSelectedPath(file.relativePath)}><Document24Regular /><span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span></button>)}</section>;
+        })}</div>
+      </aside>
+      <section className="resource-detail">
+        <header className="resource-detail-heading"><div><span>Local Markdown</span><h1>{selected?.name || 'MEMORY.md'}</h1><p>{props.localData?.memoryRoot || 'Local memory'} · Browser Agent 기록만 저장</p></div><span className="memory-scope"><ShieldLock24Regular />Local only</span></header>
+        <MarkdownDocument title={selected?.relativePath || selectedPath} content={content} editable loading={loading} dirty={dirty} onChange={(value) => { setContent(value); setDirty(true); }} onSave={() => void save()} />
+      </section>
+    </div>
+  );
+}
+
+function MarkdownDocument(props: { title: string; content: string; editable?: boolean; loading?: boolean; dirty?: boolean; onChange?(value: string): void; onSave?(): void }): ReactElement {
+  const [view, setView] = useState<'preview' | 'source'>('preview');
+  const lines = props.content.split(/\r?\n/);
+  const previewContent = props.content.replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n/, '');
+  return (
+    <section className="markdown-document">
+      <header><span><Document24Regular />{props.title}</span><div><button className={view === 'preview' ? 'active' : ''} onClick={() => setView('preview')}>Preview</button><button className={view === 'source' ? 'active' : ''} onClick={() => setView('source')}>Source</button>{props.editable && <button className="save-document" disabled={!props.dirty} onClick={props.onSave}>Save</button>}</div></header>
+      {props.loading ? <div className="resource-empty">Markdown을 불러오는 중입니다.</div> : view === 'preview' ? <div className="markdown-document-preview markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]}>{previewContent}</ReactMarkdown></div> : <div className="source-editor"><pre className="source-gutter" aria-hidden="true">{lines.map((_, index) => `${index + 1}\n`)}</pre>{props.editable ? <textarea value={props.content} onChange={(event) => props.onChange?.(event.target.value)} spellCheck={false} aria-label={`${props.title} Markdown source`} /> : <pre className="source-code">{props.content}</pre>}</div>}
+    </section>
+  );
+}
+
+function mcpMarkdown(server: McpDefinition): string {
+  return [`# ${server.name}`, '', '## Connection', '', '```json', JSON.stringify({ transport: server.transport, command: server.command, status: server.status }, null, 2), '```', '', '## Exposed tools', '', ...server.tools.map((tool) => `- \`${tool}\``), '', '## Permission boundary', '', ...server.permissions.map((permission) => `- ${permission}`), '', 'The server is re-scoped for every agent run and receives only the permissions selected by the route.', ''].join('\n');
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1_024) return `${size} B`;
+  return `${Math.round(size / 1_024)} KB`;
 }
 
 function SettingsGroup(props: { title: string; description: string; children: ReactElement | ReactElement[] }): ReactElement {
@@ -781,7 +1068,7 @@ function McpRow(props: { name: string; command: string; status: string; checked:
 }
 
 function Toggle(props: { checked: boolean; onChange(value: boolean): void }): ReactElement {
-  return <label className="toggle"><input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /><span /></label>;
+  return <label className="toggle"><input type="checkbox" aria-label="사용 여부 전환" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /><span /></label>;
 }
 
 function MessageBubble({ message }: { message: ChatMessage }): ReactElement {
@@ -789,54 +1076,94 @@ function MessageBubble({ message }: { message: ChatMessage }): ReactElement {
   return (
     <article className={`message message-${message.role}`}>
       {message.role === 'assistant' && <span className="message-avatar"><BotSparkle24Filled /></span>}
-      <div><p>{message.content}</p>{message.meta && <small className="message-meta">{message.meta}</small>}</div>
+      <div className="message-body">
+        <div className="markdown-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ children, ...anchorProps }) => <a {...anchorProps} target="_blank" rel="noreferrer">{children}</a>,
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
+        {message.meta && <small className="message-meta">{message.meta}</small>}
+      </div>
     </article>
   );
 }
 
 function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overview']> }): ReactElement {
-  const statusLabel = overview.status === 'running' ? 'Running' : overview.status === 'completed' ? 'Completed' : 'Needs attention';
+  const [expanded, setExpanded] = useState(false);
+  const statusLabel = overview.status === 'running'
+    ? 'Running'
+    : overview.status === 'completed'
+      ? 'Completed'
+      : overview.status === 'cancelled'
+        ? 'Cancelled'
+        : 'Needs attention';
   return (
-    <article className="agent-overview">
-      <header className="overview-header">
-        <div><span className="overview-brand"><BotSparkle24Filled /></span><span><strong>Browser task overview</strong><small>{overview.route.reason}</small></span></div>
-        <span className={`overview-status ${overview.status}`}>{statusLabel}</span>
-      </header>
-      <div className="overview-request">{overview.prompt}</div>
-      <div className="overview-skills"><span>Selected skills</span>{overview.route.skills.map((skill) => <span className="skill-chip" key={skill.id}><PuzzlePiece24Regular />{skill.name}<small>{skill.risk}</small></span>)}</div>
-      <div className="overview-grid">
+    <article className={expanded ? 'agent-overview expanded' : 'agent-overview'}>
+      <button className="overview-header" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
+        <div><span className="overview-brand"><BotSparkle24Filled /></span><span><strong>{overview.activity || overview.route.reason}</strong><small>{overview.route.skills.map((skill) => skill.name).join(' · ')}</small></span></div>
+        <span className="overview-header-actions"><span className={`overview-status ${overview.status}`}>{statusLabel}</span><ChevronDown24Regular className={expanded ? 'chevron-open' : ''} /></span>
+      </button>
+      {expanded && <div className="overview-details">
+        <div className="overview-skills"><span>사용 중인 skill</span>{overview.route.skills.map((skill) => <span className="skill-chip" key={skill.id}><PuzzlePiece24Regular />{skill.name}<small>{skill.risk}</small></span>)}</div>
         <div className="overview-timeline">
-          {overview.route.steps.map((step, index) => (
-            <div className="overview-step" key={step.id}>
-              <span className="step-icon">{step.kind === 'browser' ? <Globe24Regular /> : step.kind === 'guard' ? <ShieldLock24Regular /> : <Sparkle24Filled />}</span>
-              <span><strong>{step.label}</strong><small>{step.detail}</small></span>
-              <span className={overview.status === 'failed' && index === overview.route.steps.length - 1 ? 'step-state failed' : 'step-state'}>{overview.status === 'running' && index === overview.route.steps.length - 1 ? 'Waiting' : index + 1}</span>
-            </div>
-          ))}
+          {overview.route.steps.map((step, index) => {
+            const running = overview.status === 'running' && index === overview.route.steps.length - 1;
+            const complete = overview.status === 'completed' || index < overview.route.steps.length - 1;
+            return (
+              <div className={running ? 'overview-step running' : 'overview-step'} key={step.id}>
+                <span className="step-icon">{complete ? <CheckmarkCircle24Regular /> : step.kind === 'browser' ? <Globe24Regular /> : step.kind === 'guard' ? <ShieldLock24Regular /> : <Sparkle24Filled />}</span>
+                <span><strong>{step.label}</strong><small>{step.detail}</small></span>
+                <span className={overview.status === 'failed' && index === overview.route.steps.length - 1 ? 'step-state failed' : 'step-state'}>{running ? '진행 중' : complete ? '완료' : index + 1}</span>
+              </div>
+            );
+          })}
         </div>
-        <div className="overview-browser">
-          <div className="overview-browser-bar"><span /><span>{overview.route.targetUrl || 'XGEN browser workspace'}</span><Globe24Regular /></div>
-          <div className="overview-browser-canvas"><span className="browser-canvas-icon"><Globe24Regular /></span><strong>{overview.route.targetHost || 'Browser workspace'}</strong><p>Skill-scoped browser session</p><div className="browser-policy-line"><ShieldLock24Regular />{overview.route.browserActionCategories.join(' · ')}</div></div>
-        </div>
-      </div>
-      {overview.route.blockedReason && <div className="overview-blocked"><ShieldLock24Regular />{overview.route.blockedReason}</div>}
+        {overview.route.browserVisible && <div className="overview-browser-note"><Window24Regular /><span><strong>브라우저 작업 캡처</strong><small>{overview.route.targetHost || '검색 탭'} · 동작과 화면 전환 시 오른쪽에 기록</small></span></div>}
+        {overview.route.blockedReason && <div className="overview-blocked"><ShieldLock24Regular />{overview.route.blockedReason}</div>}
+      </div>}
     </article>
   );
 }
 
 function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMode; label: string }>; placeholder: string }): ReactElement {
   const models = props.selectedProvider?.models ?? [];
+  const modeHint: Record<AgentMode, string> = {
+    auto: 'Agent가 필요한 도구를 자동 선택',
+    chat: '브라우저 없이 대화',
+    search: '실시간 브라우저 · 읽기 전용',
+    page: '현재 페이지 읽기',
+    'browser-agent': '브라우저 조작 · Memory 저장',
+  };
+  const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (!props.prompt.trim() || props.busy || !props.selectedProvider?.available) return;
+    event.currentTarget.form?.requestSubmit();
+  };
   return (
     <form className="composer" onSubmit={props.onSubmit}>
-      <textarea value={props.prompt} onChange={(event) => props.onChangePrompt(event.target.value)} placeholder={props.busy ? '로컬 agent가 실행 중입니다' : props.placeholder} aria-label={props.placeholder} disabled={props.busy} />
+      <div className="composer-primary">
+        <textarea value={props.prompt} onChange={(event) => props.onChangePrompt(event.target.value)} onKeyDown={submitOnEnter} placeholder={props.busy ? '로컬 agent가 실행 중입니다' : props.placeholder} aria-label={`${props.placeholder}. Enter로 전송, Shift+Enter로 줄바꿈`} disabled={props.busy} />
+        <label className="mode-select"><span className="sr-only">실행 범위</span><select value={props.mode} onChange={(event) => props.onChangeMode(event.target.value as AgentMode)}>{props.modes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
+      </div>
       <div className="composer-tools">
-        <button type="button" className="icon-button" aria-label="파일 첨부"><Attach24Regular /></button>
+        <div className="composer-context-tools">
+          <button type="button" className="icon-button compact" aria-label="파일 첨부"><Attach24Regular /></button>
+          <span className="mode-boundary-hint">{modeHint[props.mode]}</span>
+          <span className="context-chip"><Document24Regular />Local<ChevronDown24Regular /></span>
+          <span className="context-chip"><ShieldLock24Regular />Guard<ChevronDown24Regular /></span>
+        </div>
         <div className="composer-options">
-          <label className="compact-select mode-select"><span className="sr-only">Mode</span><select value={props.mode} onChange={(event) => props.onChangeMode(event.target.value as AgentMode)}>{props.modes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
-          <label className="compact-select"><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'ChatGPT' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
+          <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
           <label className="compact-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
-          <button type="button" className="icon-button" aria-label="음성 입력"><Mic24Regular /></button>
-          <button type="submit" className="send-button" disabled={!props.prompt.trim() || props.busy || !props.selectedProvider?.available} aria-label="보내기"><Send24Filled /></button>
+          <label className="compact-select reasoning-select"><span className="sr-only">추론 강도</span><select value={props.selectedProvider?.supportsReasoningEffort ? props.reasoningEffort : 'auto'} disabled={!props.selectedProvider?.supportsReasoningEffort} onChange={(event) => props.onChangeReasoning(event.target.value as ReasoningEffort)}>{props.selectedProvider?.supportsReasoningEffort ? reasoningOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>) : <option value="auto">Provider default</option>}</select><ChevronDown24Regular /></label>
+          <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
+          {props.busy && <button type="button" className="send-button stop-button" onClick={props.onCancel} aria-label="실행 중지"><Dismiss24Regular /></button>}
         </div>
       </div>
     </form>
@@ -845,6 +1172,52 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
 
 function errorMessage(error: unknown): ChatMessage {
   return { id: crypto.randomUUID(), role: 'assistant', content: error instanceof Error ? error.message : String(error) };
+}
+
+function applyRunEvent(
+  messages: ChatMessage[],
+  responseId: string,
+  overviewId: string | undefined,
+  event: AgentRunEvent,
+): ChatMessage[] {
+  return messages.map((message) => {
+    if (message.id === responseId) {
+      if (event.type === 'text') {
+        return {
+          ...message,
+          content: event.mode === 'append' ? `${message.content}${event.text}` : event.text,
+          meta: '응답 스트리밍 중',
+        };
+      }
+      return { ...message, meta: runEventLabel(event) };
+    }
+    if (overviewId && message.id === overviewId && message.overview) {
+      if (event.type === 'browser-snapshot') {
+        const snapshots = [...(message.overview.snapshots ?? []), event.snapshot].slice(-8);
+        return { ...message, overview: { ...message.overview, snapshots, activity: event.snapshot.reason } };
+      }
+      return { ...message, overview: { ...message.overview, activity: runEventLabel(event) } };
+    }
+    return message;
+  });
+}
+
+function runEventLabel(event: AgentRunEvent): string {
+  switch (event.type) {
+    case 'run-started': return '실행을 시작했습니다';
+    case 'skills-routed': return event.route.reason;
+    case 'provider-started': return `${event.providerId === 'codex' ? 'Codex' : 'Claude Code'} · ${event.model}`;
+    case 'text': return '응답 스트리밍 중';
+    case 'activity': return `${event.name} · ${event.phase}`;
+    case 'browser-snapshot': return `${event.snapshot.title} · 화면 캡처`;
+    case 'run-finished': return runStateLabel(event.state);
+  }
+}
+
+function runStateLabel(state: 'completed' | 'failed' | 'cancelled'): string {
+  if (state === 'completed') return '완료';
+  if (state === 'cancelled') return '중지됨';
+  return '실패';
 }
 
 function formatHost(url?: string): string {

@@ -1,6 +1,6 @@
 import { BrowserWindow, WebContentsView } from 'electron';
 import { randomUUID } from 'node:crypto';
-import type { BrowserLayoutState, BrowserTabState, PageContext } from '../shared/contracts';
+import type { BrowserHistoryEntry, BrowserLayoutState, BrowserSnapshot, BrowserTabState, PageContext } from '../shared/contracts';
 
 interface BrowserTab {
   id: string;
@@ -12,6 +12,7 @@ interface BrowserTab {
 
 export class BrowserWorkspace {
   private readonly tabs = new Map<string, BrowserTab>();
+  private readonly history: BrowserHistoryEntry[] = [];
   private activeTabId: string | undefined;
   private attachedTabId: string | undefined;
   private layoutState: BrowserLayoutState = {
@@ -38,6 +39,7 @@ export class BrowserWorkspace {
         partition: 'persist:xgen-side-default',
       },
     });
+    view.setVisible(false);
     const tab: BrowserTab = {
       id,
       view,
@@ -69,6 +71,7 @@ export class BrowserWorkspace {
 
     const wasActive = this.activeTabId === id;
     if (this.attachedTabId === id) {
+      tab.view.setVisible(false);
       this.window.contentView.removeChildView(tab.view);
       this.attachedTabId = undefined;
     }
@@ -87,6 +90,14 @@ export class BrowserWorkspace {
 
   listTabs(): BrowserTabState[] {
     return this.snapshot();
+  }
+
+  historySince(sinceMs: number): BrowserHistoryEntry[] {
+    return this.history.filter((entry) => entry.visitedAtMs >= sinceMs).map((entry) => ({ ...entry }));
+  }
+
+  activeUrl(): string | undefined {
+    return this.activeTab()?.url;
   }
 
   async navigate(input: string): Promise<BrowserTabState[]> {
@@ -142,6 +153,8 @@ export class BrowserWorkspace {
       leftWidth: clampLayoutValue(layout.leftWidth, 0, 420),
       rightWidth: clampLayoutValue(layout.rightWidth, 0, 480),
       chromeHeight: clampLayoutValue(layout.chromeHeight, 56, 110),
+      placement: layout.placement === 'right-dock' ? 'right-dock' : 'workspace',
+      dockInset: clampLayoutValue(layout.dockInset ?? 10, 0, 32),
     };
     this.syncAttachedView();
     this.layout();
@@ -169,6 +182,7 @@ export class BrowserWorkspace {
       tab.loading = false;
       tab.url = webContents.getURL();
       tab.title = webContents.getTitle() || tab.url;
+      this.recordHistory(tab);
       this.emit();
     });
     webContents.on('did-navigate', (_event, url) => {
@@ -177,6 +191,7 @@ export class BrowserWorkspace {
     });
     webContents.on('did-navigate-in-page', (_event, url) => {
       tab.url = url;
+      this.recordHistory(tab);
       this.emit();
     });
     webContents.on('page-title-updated', (_event, title) => {
@@ -192,6 +207,18 @@ export class BrowserWorkspace {
     const active = this.activeTab();
     if (!this.layoutState.visible || this.attachedTabId !== active?.id) return;
 
+    if (this.layoutState.placement === 'right-dock') {
+      const inset = this.layoutState.dockInset ?? 10;
+      const dockWidth = Math.max(360, this.layoutState.rightWidth - inset * 2);
+      active?.view.setBounds({
+        x: Math.max(this.layoutState.leftWidth, width - this.layoutState.rightWidth + inset),
+        y: this.layoutState.chromeHeight,
+        width: dockWidth,
+        height: Math.max(240, height - this.layoutState.chromeHeight - inset),
+      });
+      return;
+    }
+
     const browserWidth = Math.max(320, width - this.layoutState.leftWidth - this.layoutState.rightWidth);
     active?.view.setBounds({
       x: this.layoutState.leftWidth,
@@ -206,18 +233,28 @@ export class BrowserWorkspace {
     if (!this.layoutState.visible || !active) {
       if (this.attachedTabId) {
         const attached = this.tabs.get(this.attachedTabId);
-        if (attached) this.window.contentView.removeChildView(attached.view);
+        if (attached) {
+          attached.view.setVisible(false);
+          this.window.contentView.removeChildView(attached.view);
+        }
         this.attachedTabId = undefined;
       }
       return;
     }
 
-    if (this.attachedTabId === active.id) return;
+    if (this.attachedTabId === active.id) {
+      active.view.setVisible(true);
+      return;
+    }
     if (this.attachedTabId) {
       const attached = this.tabs.get(this.attachedTabId);
-      if (attached) this.window.contentView.removeChildView(attached.view);
+      if (attached) {
+        attached.view.setVisible(false);
+        this.window.contentView.removeChildView(attached.view);
+      }
     }
     this.window.contentView.addChildView(active.view);
+    active.view.setVisible(true);
     this.attachedTabId = active.id;
   }
 
@@ -237,6 +274,59 @@ export class BrowserWorkspace {
     const tabs = this.snapshot();
     this.notify(tabs);
     return tabs;
+  }
+
+  async captureSnapshot(reason: string): Promise<BrowserSnapshot | undefined> {
+    const tab = this.activeTab();
+    if (!tab || tab.view.webContents.isDestroyed() || tab.url === 'about:blank') return undefined;
+    const temporarilyAttached = this.attachedTabId !== tab.id;
+    if (temporarilyAttached) {
+      const size = this.window.getContentSize();
+      const windowWidth = size[0] ?? 1280;
+      const windowHeight = size[1] ?? 720;
+      this.window.contentView.addChildView(tab.view);
+      tab.view.setBounds({
+        x: Math.max(300, windowWidth - 530),
+        y: 70,
+        width: Math.min(520, windowWidth - 310),
+        height: Math.max(320, windowHeight - 80),
+      });
+      tab.view.setVisible(true);
+    }
+    try {
+      await delay(80);
+      const image = await withTimeout(tab.view.webContents.capturePage(), 2_500);
+      if (!image || image.isEmpty()) return undefined;
+      return {
+        id: randomUUID(),
+        tabId: tab.id,
+        title: tab.title || tab.url,
+        url: tab.url,
+        capturedAt: new Date().toISOString(),
+        reason,
+        imageDataUrl: image.toDataURL(),
+      };
+    } finally {
+      if (temporarilyAttached) {
+        tab.view.setVisible(false);
+        this.window.contentView.removeChildView(tab.view);
+      }
+    }
+  }
+
+  private recordHistory(tab: BrowserTab): void {
+    if (!tab.url || tab.url === 'about:blank') return;
+    const previous = this.history[this.history.length - 1];
+    if (previous?.tabId === tab.id && previous.url === tab.url && Date.now() - previous.visitedAtMs < 2_000) return;
+    const visitedAtMs = Date.now();
+    this.history.push({
+      tabId: tab.id,
+      title: tab.title || tab.url,
+      url: tab.url,
+      visitedAt: new Date(visitedAtMs).toISOString(),
+      visitedAtMs,
+    });
+    if (this.history.length > 2_000) this.history.splice(0, this.history.length - 2_000);
   }
 }
 
@@ -265,5 +355,21 @@ function isAllowedBrowserUrl(url: string): boolean {
     return protocol === 'http:' || protocol === 'https:' || protocol === 'about:';
   } catch {
     return false;
+  }
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
+async function withTimeout<T>(promise: Promise<T>, durationMs: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), durationMs); }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

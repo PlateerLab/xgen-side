@@ -15,8 +15,11 @@ The first bootstrap milestone includes:
 - an upstream tracking strategy for agent-browser
 - ChatGPT subscription authentication through the official Codex CLI
 - provider and model selection inside both composers
-- separate Chat, Search, Ask page, and Browser agent execution modes
+- Auto routing with optional No web, Research, Ask page, and Browser work boundaries
+- event-driven browser screenshots instead of an always-live browser dock
+- selectable Codex reasoning effort with an automatic task-aware default
 - a versioned local JSONL run store under Electron's user data directory
+- a provider-neutral execution event stream with live text, tool activity, and user cancellation
 - an `agent-browser` MCP bridge attached to the active Electron instance over loopback CDP
 - Claude subscription authentication through the official Claude Code CLI
 - a local Skill Router that selects capabilities before exposing provider tools

@@ -10,12 +10,14 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/main/security/policy-engine.test.ts src/main/command/command-broker.test.ts"
+    "test": "tsx --test src/main/security/policy-engine.test.ts src/main/command/command-broker.test.ts src/main/provider/provider-adapter.test.ts src/main/provider/provider-runtime.test.ts src/main/skills/skill-router.test.ts"
   },
   "dependencies": {
     "@fluentui/react-icons": "^2.0.334",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

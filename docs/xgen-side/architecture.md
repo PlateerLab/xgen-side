@@ -22,7 +22,9 @@ The desktop process reserves a random loopback CDP port at startup. Browser agen
 
 Provider adapters execute native provider CLIs with `shell: false` and send user prompts over stdin. A Windows app does not need to route every prompt through PowerShell. PowerShell is used only for a visible, user-controlled OAuth login terminal and for commands that pass through the command broker.
 
-`ProviderManager` is provider-neutral. It owns validation, sessions, browser policy, timeouts, logs, and the common run lifecycle. `CodexAdapter` and `ClaudeCodeAdapter` implement the same `ProviderAdapter` contract for discovery, authentication, run planning, and response parsing. Adding another local CLI provider does not add provider branches to the manager.
+`ProviderManager` is provider-neutral. It owns validation, sessions, browser policy, timeouts, logs, cancellation, and the common run lifecycle. `CodexAdapter` and `ClaudeCodeAdapter` implement the same `ProviderAdapter` contract for discovery, authentication, run planning, response parsing, and stream-event normalization. Adding another local CLI provider does not add provider branches to the manager.
+
+Provider subprocess output is parsed line by line while the process is active. The main process emits provider-neutral run, route, text, activity, and completion events through a request-scoped IPC channel. The preload keeps renderer callbacks isolated by run ID, and cancellation is accepted only from the renderer that started the run. The final provider output remains available for deterministic parsing and local diagnostics.
 
 Codex runs with an XGEN-specific `CODEX_HOME`. The official CLI stores its own session in Windows Credential Manager through the `keyring` setting. XGEN Side never reads or copies the token. Chat, Search, and Ask page use the Codex read-only sandbox. Browser agent uses the workspace-write sandbox only for its isolated session workspace.
 
@@ -32,8 +34,11 @@ This local CLI adapter is different from offering Claude subscription authentica
 
 ### Execution modes
 
-- Chat sends only the conversation request to a local provider runner. It receives no browser context.
-- Search enables live provider web search and asks for source URLs. It cannot control the visible browser.
+- Auto classifies each request as conversation, read-only research, attached-page reading, or guarded browser work. Users can still select an explicit boundary when needed.
+- Conversation sends only the conversation request to a local provider runner. It receives no browser context.
+- Research uses the provider's read-only web search directly. It does not open a search-engine tab or start the browser MCP daemon, which keeps current-information requests fast and avoids duplicate searches.
+- Browser work uses the local `xgen_browser` MCP bridge for guarded navigation and interaction. Its first connection is restricted to the active loopback CDP target, and action permissions remain route-scoped.
+- Browser-backed runs keep the native browser detached between capture events. XGEN Side attaches it briefly after meaningful browser actions, captures the visible result, deduplicates unchanged frames, and renders the screenshots in the activity rail.
 - Ask page captures the active tab title, URL, selection, and visible text. It is read-only and cannot navigate or click.
 - Browser agent attaches the current page context and the local `agent-browser` MCP tools. It can inspect and operate the Electron browser within the browser action policy.
 
@@ -41,11 +46,19 @@ Typing in the browser address bar remains normal navigation or search-engine sea
 
 ### Skill router
 
-Every agent run is routed through at least one versioned Skill before provider execution. The router evaluates the requested mode, prompt intent, target URL, domain, local enablement, and risk class. A normal chat receives only the Conversation Skill. Search and page questions receive dedicated read Skills. A chat request that requires navigation, extraction, or form interaction receives Browser Skills and is promoted to a guarded browser run without requiring the user to change modes manually.
+Every agent run is routed through at least one versioned Skill before provider execution. Skills are real packages under `apps/desktop/skills`, with `SKILL.md`, a deterministic runtime manifest, provider metadata, and optional reference files. The loader validates package identity, runtime bindings, agent-browser profiles, tool names, and action-policy categories before the router can use them.
 
-Skills declare browser action categories rather than raw command strings. XGEN Side writes the union of those categories to an `agent-browser` action policy with `default: deny`. The provider receives the browser MCP bridge only when an enabled selected Skill requires it. Disabled Skills therefore remove both the prompt capability and the underlying browser action permission.
+The router evaluates the requested boundary, prompt intent, attached page, target URL, local enablement, and risk class from the manifests. Auto selects Conversation for stable questions, Web Research for current or source-backed requests, Page Reader for attached-page questions, and guarded Browser Skills for interaction requests. Supplemental extraction or interaction Skills and the Form Guard are added only when their activation signals match.
 
-The renderer can preview the deterministic route before execution. Browser-routed chats show an Overview containing the selection reason, Skill identities, risk levels, execution steps, target host, and effective action categories. The final route is also stored in the session event log and returned with the provider result.
+Codex requests also carry a reasoning effort. Auto resolves to low effort for ordinary conversation and research, medium for page analysis, and high for guarded browser work. Manual Fast, Balanced, Deep, and Very Deep choices map to the supported Codex CLI values. Providers without a verified reasoning control keep their own default.
+
+Skills declare exact MCP tools for provider context and separate browser action-policy categories for engine enforcement. XGEN Side writes the union of allowed categories to an `agent-browser` action policy with `default: deny`. It injects the selected `SKILL.md` workflows and reference contracts into the provider request, and exposes only the declared MCP profiles when browser control is required. Disabled Skills therefore remove the workflow, tools, and underlying browser permissions together.
+
+The renderer can preview the deterministic route before execution. Browser-backed runs show an Overview containing the selection reason, Skill identities, risk levels, execution steps, target host, and effective action categories. The final route is also stored in the session event log and returned with the provider result.
+
+### Browser Agent memory
+
+Local session JSON and provider traces remain available for diagnostics, but user-facing Markdown memory is intentionally narrower. Only Browser agent runs write files under `memory/browser-history/` and `memory/task-results/`. Chat, Search, and Ask page do not create browser memory. The Settings workbench lists these files and supports rendered Markdown plus source editing.
 
 ### Policy engine
 
@@ -61,9 +74,9 @@ Browser actions, commands, files, XGEN, MCP servers, and model providers will ex
 
 ### Local run store
 
-Every provider run receives a UUID and a directory under `agent-data/sessions`. The directory contains `session.json`, `events.jsonl`, provider stdout and stderr, an isolated workspace, and page context when attached. The JSONL events use a versioned provider-neutral envelope so a later AgentFlow replacement can replay or export the same history. Provider tokens and API keys are redacted and are never written intentionally.
+Every provider run receives a UUID and a directory under `agent-data/sessions`. The directory contains `session.json`, `events.jsonl`, provider stdout and stderr, an isolated workspace, and page context when attached. The JSONL events use a versioned provider-neutral envelope and record live execution event metadata without duplicating response text into every event. A later AgentFlow replacement can replay or export the same history. Provider tokens and API keys are redacted and are never written intentionally.
 
-Application preferences live in `agent-data/settings.json`. General execution preferences, MCP enablement, and domain-scoped Skill enablement use one versioned schema and an atomic local write. The renderer receives this store only through typed IPC and cannot choose an arbitrary settings path.
+Application preferences live in `agent-data/settings.json`. General execution preferences, MCP enablement, and package-scoped Skill enablement use one versioned schema and an atomic local write. The renderer receives this store only through typed IPC and cannot choose an arbitrary settings path.
 
 ## Security invariants
 

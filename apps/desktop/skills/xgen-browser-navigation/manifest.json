@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.browser-navigation",
+  "settingKey": "global:browser-navigation",
+  "category": "Browser",
+  "domain": "Visible XGEN browser",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "primary",
+    "modes": ["browser-agent"],
+    "intents": ["open-url", "navigate", "visit", "tab-management", "scroll", "browser-inspection"],
+    "signals": ["open", "navigate", "visit", "go to", "switch tab", "scroll", "열어", "열고", "접속", "이동", "방문", "탭 전환", "스크롤"]
+  },
+  "runtime": {
+    "kind": "agent-browser",
+    "capability": "browser-control",
+    "adapter": "agent-browser",
+    "server": "xgen_browser",
+    "toolProfiles": ["core", "tabs"],
+    "tools": ["agent_browser_tab_list", "agent_browser_tab_switch", "agent_browser_open", "agent_browser_snapshot", "agent_browser_scroll", "agent_browser_wait_for_selector", "agent_browser_wait_for_text", "agent_browser_wait_for_load", "agent_browser_get_title", "agent_browser_get_url"]
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get"],
+    "confirmActions": [],
+    "denyActions": ["eval", "upload", "download", "network", "state", "submit"]
+  },
+  "presentation": {
+    "browserVisible": true
+  },
+  "progress": {
+    "label": "Browser navigation",
+    "detail": "Controls tabs and pages through agent-browser"
+  }
+}

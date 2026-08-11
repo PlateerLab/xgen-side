@@ -15,6 +15,16 @@ export interface BrowserLayoutState {
   leftWidth: number;
   rightWidth: number;
   chromeHeight: number;
+  placement?: 'workspace' | 'right-dock';
+  dockInset?: number;
+}
+
+export interface BrowserHistoryEntry {
+  tabId: string;
+  title: string;
+  url: string;
+  visitedAt: string;
+  visitedAtMs: number;
 }
 
 export interface CommandRequest {
@@ -44,8 +54,48 @@ export interface EngineStatus {
 }
 
 export type ProviderId = 'codex' | 'claude';
-export type AgentMode = 'chat' | 'search' | 'page' | 'browser-agent';
-export type BrowserActionCategory = 'navigate' | 'click' | 'fill' | 'snapshot' | 'scroll' | 'wait' | 'read' | 'get' | 'interact';
+export type ResolvedAgentMode = 'chat' | 'search' | 'page' | 'browser-agent';
+export type AgentMode = 'auto' | ResolvedAgentMode;
+export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
+export type BrowserActionCategory = 'navigate' | 'click' | 'fill' | 'eval' | 'download' | 'upload' | 'snapshot' | 'scroll' | 'wait' | 'read' | 'get' | 'interact' | 'network' | 'state';
+
+export type SkillRuntimeKind = 'llm' | 'provider-web' | 'page-context' | 'agent-browser' | 'policy';
+
+export interface SkillRuntimeDescriptor {
+  kind: SkillRuntimeKind;
+  capability: string;
+  adapter?: string;
+  server?: string;
+  toolProfiles?: string[];
+  tools: string[];
+}
+
+export interface SkillPermissionDescriptor {
+  risk: 'read' | 'write' | 'consequential';
+  allowActions: string[];
+  confirmActions: string[];
+  denyActions: string[];
+}
+
+export interface SkillProgressDescriptor {
+  label: string;
+  detail: string;
+}
+
+export interface SkillCatalogEntry {
+  id: string;
+  settingKey: string;
+  name: string;
+  description: string;
+  category: string;
+  domain: string;
+  enabledByDefault: boolean;
+  source: string;
+  markdown: string;
+  runtime: SkillRuntimeDescriptor;
+  permissions: SkillPermissionDescriptor;
+  progress: SkillProgressDescriptor;
+}
 
 export interface RoutedSkill {
   id: string;
@@ -54,19 +104,24 @@ export interface RoutedSkill {
   description: string;
   domain: string;
   risk: 'read' | 'write' | 'consequential';
+  runtime: SkillRuntimeDescriptor;
+  permissions: SkillPermissionDescriptor;
+  progress: SkillProgressDescriptor;
 }
 
 export interface SkillRouteStep {
   id: string;
   label: string;
   detail: string;
-  kind: 'route' | 'browser' | 'extract' | 'guard' | 'result';
+  kind: 'route' | 'research' | 'page' | 'browser' | 'interaction' | 'extract' | 'guard' | 'result';
 }
 
 export interface SkillRoute {
   id: string;
+  resolvedMode: ResolvedAgentMode;
   reason: string;
-  browserRequired: boolean;
+  browserVisible: boolean;
+  agentBrowserRequired: boolean;
   targetUrl?: string;
   targetHost?: string;
   browserActionCategories: BrowserActionCategory[];
@@ -86,6 +141,7 @@ export interface ProviderStatus {
   version?: string;
   executablePath?: string;
   models: Array<{ id: string; label: string }>;
+  supportsReasoningEffort?: boolean;
   error?: string;
   complianceNotice?: string;
 }
@@ -103,6 +159,7 @@ export interface AgentRunRequest {
   providerId: ProviderId;
   model: string;
   mode: AgentMode;
+  reasoningEffort?: ReasoningEffort;
   prompt: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   pageContext?: PageContext;
@@ -110,7 +167,7 @@ export interface AgentRunRequest {
 
 export interface AgentRunResult {
   sessionId: string;
-  state: 'completed' | 'failed';
+  state: 'completed' | 'failed' | 'cancelled';
   answer?: string;
   error?: string;
   durationMs: number;
@@ -118,9 +175,44 @@ export interface AgentRunResult {
   route?: SkillRoute;
 }
 
+export interface BrowserSnapshot {
+  id: string;
+  tabId: string;
+  title: string;
+  url: string;
+  capturedAt: string;
+  reason: string;
+  imageDataUrl: string;
+}
+
+export type AgentRunEvent =
+  | { type: 'run-started'; sessionId: string; at: string }
+  | { type: 'skills-routed'; sessionId: string; at: string; route: SkillRoute }
+  | { type: 'provider-started'; sessionId: string; at: string; providerId: ProviderId; model: string; sandbox: string }
+  | { type: 'text'; sessionId: string; at: string; text: string; mode: 'append' | 'replace' }
+  | { type: 'activity'; sessionId: string; at: string; name: string; phase: 'started' | 'updated' | 'completed' | 'failed'; detail?: string }
+  | { type: 'browser-snapshot'; sessionId: string; at: string; snapshot: BrowserSnapshot }
+  | { type: 'run-finished'; sessionId: string; at: string; state: AgentRunResult['state']; durationMs: number; error?: string };
+
+export interface AgentRunHandle {
+  id: string;
+  result: Promise<AgentRunResult>;
+  cancel(): Promise<boolean>;
+}
+
 export interface LocalDataStatus {
   root: string;
   sessionsRoot: string;
+  memoryRoot: string;
+}
+
+export interface LocalMarkdownFile {
+  id: string;
+  name: string;
+  relativePath: string;
+  category: 'browser-history' | 'task-results' | 'root';
+  updatedAt: string;
+  size: number;
 }
 
 export interface AppSettings {
@@ -157,13 +249,18 @@ export interface XgenSideApi {
   };
   agent: {
     run(request: AgentRunRequest): Promise<AgentRunResult>;
+    start(request: AgentRunRequest, listener?: (event: AgentRunEvent) => void): AgentRunHandle;
   };
   skills: {
+    list(): Promise<SkillCatalogEntry[]>;
     route(request: AgentRunRequest): Promise<SkillRoute>;
   };
   localData: {
     status(): Promise<LocalDataStatus>;
     open(): Promise<string>;
+    listMarkdown(): Promise<LocalMarkdownFile[]>;
+    readMarkdown(relativePath: string): Promise<string>;
+    writeMarkdown(relativePath: string, content: string): Promise<void>;
   };
   settings: {
     load(): Promise<AppSettings>;

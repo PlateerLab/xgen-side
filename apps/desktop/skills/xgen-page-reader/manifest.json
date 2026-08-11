@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.page-reader",
+  "settingKey": "global:page-reader",
+  "category": "Research",
+  "domain": "Active browser page",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "primary",
+    "modes": ["page"],
+    "intents": ["page-question", "page-summary", "selection-summary", "page-comparison"],
+    "signals": ["this page", "current page", "attached page", "selected text", "이 페이지", "현재 페이지", "지금 페이지", "선택한 텍스트"]
+  },
+  "runtime": {
+    "kind": "page-context",
+    "capability": "page-read",
+    "tools": ["electron_page_context"]
+  },
+  "permissions": {
+    "risk": "read",
+    "allowActions": ["read"],
+    "confirmActions": [],
+    "denyActions": ["browser-control", "navigate", "click", "fill"]
+  },
+  "progress": {
+    "label": "Reading page",
+    "detail": "Uses the attached page context without controlling the browser"
+  }
+}

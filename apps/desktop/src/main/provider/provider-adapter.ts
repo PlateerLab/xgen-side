@@ -9,6 +9,7 @@ export interface LocatedExecutable {
 export interface BrowserBridge {
   executablePath: string;
   environment: Record<string, string>;
+  toolProfiles: string[];
 }
 
 export interface ProviderRunPlan {
@@ -17,6 +18,10 @@ export interface ProviderRunPlan {
   env: NodeJS.ProcessEnv;
   sandbox: string;
 }
+
+export type ProviderStreamEvent =
+  | { type: 'text'; text: string; mode: 'append' | 'replace' }
+  | { type: 'activity'; name: string; phase: 'started' | 'updated' | 'completed' | 'failed'; detail?: string };
 
 export interface ProviderAdapter {
   readonly id: ProviderId;
@@ -28,4 +33,5 @@ export interface ProviderAdapter {
     browser?: BrowserBridge,
   ): Promise<ProviderRunPlan>;
   parseAnswer(stdout: string): string;
+  parseStreamLine(line: string): ProviderStreamEvent[];
 }

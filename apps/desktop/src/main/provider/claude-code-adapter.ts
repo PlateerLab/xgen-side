@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
 import { LocalRunStore, type RunSession } from '../storage/local-run-store';
-import type { BrowserBridge, ProviderAdapter, ProviderRunPlan } from './provider-adapter';
+import type { BrowserBridge, ProviderAdapter, ProviderRunPlan, ProviderStreamEvent } from './provider-adapter';
 import { authError, collect, launchLoginTerminal, locateNativeExecutable, safeEnvironment } from './provider-runtime';
 
 const models = [
@@ -33,6 +33,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       version: executable?.version,
       executablePath: executable?.path,
       models,
+      supportsReasoningEffort: false,
       error: executable ? authError(auth, 'Claude 로그인이 필요합니다.') : 'Claude Code CLI를 찾지 못했습니다.',
       complianceNotice: '로컬 사용자가 직접 설치·로그인한 공식 Claude Code CLI만 실행합니다. 호스팅·공유형 배포는 Anthropic API 또는 별도 승인이 필요합니다.',
     };
@@ -42,7 +43,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     const executable = await this.locate();
     if (!executable) return { launched: false, message: 'Claude Code CLI를 먼저 설치해 주세요.' };
     const home = await this.prepareHome();
-    launchLoginTerminal({
+    await launchLoginTerminal({
       executablePath: executable.path,
       args: ['auth', 'login'],
       cwd: home,
@@ -62,6 +63,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     const args = [
       '-p',
       '--output-format', 'stream-json',
+      '--include-partial-messages',
       '--verbose',
       '--model', request.model,
       '--permission-mode', browser ? 'default' : 'plan',
@@ -73,11 +75,12 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
     if (browser) {
       const mcpConfigPath = join(session.directory, 'claude-mcp.json');
+      const toolProfiles = browser.toolProfiles.join(',') || 'core';
       await writeFile(mcpConfigPath, JSON.stringify({
         mcpServers: {
           xgen_browser: {
             command: browser.executablePath,
-            args: ['mcp', '--tools', 'core,tabs'],
+            args: ['mcp', '--tools', toolProfiles],
             env: browser.environment,
           },
         },
@@ -123,6 +126,46 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       }
     }
     return (result || assistantText).trim();
+  }
+
+  parseStreamLine(line: string): ProviderStreamEvent[] {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+    if (event.type === 'stream_event') {
+      const streamEvent = event.event as Record<string, unknown> | undefined;
+      const delta = streamEvent?.delta as Record<string, unknown> | undefined;
+      if (streamEvent?.type === 'content_block_delta' && delta?.type === 'text_delta' && typeof delta.text === 'string') {
+        return [{ type: 'text', text: delta.text, mode: 'append' }];
+      }
+    }
+    if (event.type === 'result' && typeof event.result === 'string') {
+      return [{ type: 'text', text: event.result, mode: 'replace' }];
+    }
+    if (event.type !== 'assistant') return [];
+    const message = event.message as Record<string, unknown> | undefined;
+    const content = Array.isArray(message?.content)
+      ? message.content.map((item) => item as Record<string, unknown>)
+      : [];
+    const output: ProviderStreamEvent[] = [];
+    const text = content
+      .filter((item) => item.type === 'text' && typeof item.text === 'string')
+      .map((item) => item.text as string)
+      .join('\n');
+    if (text) output.push({ type: 'text', text, mode: 'replace' });
+    for (const item of content) {
+      if (item.type === 'tool_use') {
+        output.push({
+          type: 'activity',
+          name: typeof item.name === 'string' ? item.name : 'Tool',
+          phase: 'started',
+        });
+      }
+    }
+    return output;
   }
 
   private locate(): Promise<{ path: string; version: string } | undefined> {

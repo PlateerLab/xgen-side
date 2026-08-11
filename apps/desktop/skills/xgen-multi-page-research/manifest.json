@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.multi-page-research",
+  "settingKey": "global:multi-page-research",
+  "category": "Research",
+  "domain": "Public web",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["search"],
+    "intents": ["deep-research", "multiple-sources", "cross-check", "fact-check", "research-report", "evidence-comparison", "source-ledger"],
+    "signals": ["compare sources", "multiple sources", "independent sources", "deep research", "research report", "source ledger", "fact check", "fact-check", "cross-check", "cross check", "verify with sources", "evidence comparison", "여러 출처", "복수 출처", "출처 비교", "교차 검증", "심층 조사", "리서치 보고서", "팩트체크", "근거 비교", "출처별"]
+  },
+  "runtime": {
+    "kind": "provider-web",
+    "capability": "multi-source-web-research",
+    "tools": ["provider_web_search"]
+  },
+  "permissions": {
+    "risk": "read",
+    "allowActions": ["search", "read"],
+    "confirmActions": [],
+    "denyActions": ["browser-control", "click", "fill", "submit", "download"]
+  },
+  "presentation": {
+    "browserVisible": false
+  },
+  "progress": {
+    "label": "Cross-checking sources",
+    "detail": "Compares independent evidence and builds a bounded source ledger"
+  }
+}

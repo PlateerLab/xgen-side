@@ -1,0 +1,7 @@
+interface:
+  display_name: "Conversation"
+  short_description: "Answer without web or browser tools"
+  default_prompt: "Use $xgen-conversation to answer this request without external tools."
+
+policy:
+  allow_implicit_invocation: true

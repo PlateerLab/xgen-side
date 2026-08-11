@@ -2,7 +2,7 @@
 
 A skill-first AI browser that runs locally on Windows.
 
-XGEN Side brings general chat, web search, and real browser automation together in one desktop application. Every request passes through the Skill Router first, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
+XGEN Side brings general chat, web research, and real browser automation together in one desktop application. Auto mode lets the Skill Router choose the smallest required capability for each request, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
 
 > Current status: early Windows desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
 
@@ -11,7 +11,8 @@ XGEN Side brings general chat, web search, and real browser automation together 
 - Left panel: manage chat and browser sessions in one unified list
 - Center workspace: switch between general AI chat and real browser tabs
 - Right panel: ask questions and run tasks against the currently open page
-- Browser Agent Overview: when a chat request requires browser work, display the selected skills, execution steps, target site, and permitted actions
+- Browser Agent Overview: when a request requires browser work, display the selected skills, execution steps, target site, permitted actions, and event-driven browser screenshots
+- Reasoning effort: use Auto, Fast, Balanced, Deep, or Very Deep for Codex models while unsupported providers keep their own default
 - Light and dark themes with the XGEN accent color `#305EEB`
 
 ## Skill-first execution
@@ -40,6 +41,7 @@ Local run store
 - Only the action categories required by the selected skills are allowed at runtime.
 - If a required skill is disabled, execution is blocked before the provider or browser starts.
 - Skill routing decisions and execution events are stored in the local session history.
+- Provider text and tool activity are streamed into the conversation while a run is active, and the user can stop the active run from the composer.
 
 ## Providers
 
@@ -113,8 +115,9 @@ See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs
 - [x] Skill Router and least-privilege browser policy
 - [x] Browser Agent Overview
 - [x] Local run history
+- [x] Real-time provider output and run cancellation
 - [ ] Live Electron tab rendering inside the Overview
-- [ ] Approval UI and real-time command stream
+- [ ] Approval UI for command and consequential browser actions
 - [ ] Windows installer and automatic updates
 
 ## Upstream

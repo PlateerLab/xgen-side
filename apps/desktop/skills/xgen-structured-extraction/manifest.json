@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.structured-extraction",
+  "settingKey": "global:structured-extraction",
+  "category": "Research",
+  "domain": "Attached or visible browser page",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["page", "browser-agent"],
+    "intents": ["extract", "collect", "table", "list", "json", "csv", "compare", "price"],
+    "signals": ["extract", "collect", "scrape", "table", "list", "json", "csv", "compare", "price", "추출", "수집", "표", "목록", "비교", "가격", "정리"]
+  },
+  "runtime": {
+    "kind": "agent-browser",
+    "capability": "browser-read",
+    "adapter": "agent-browser",
+    "server": "xgen_browser",
+    "toolProfiles": ["core", "tabs"],
+    "tools": ["agent_browser_snapshot", "agent_browser_read", "agent_browser_get_text", "agent_browser_get_url", "agent_browser_get_title", "agent_browser_scroll", "agent_browser_wait_for_selector", "agent_browser_wait_for_text", "agent_browser_wait_for_load"]
+  },
+  "permissions": {
+    "risk": "read",
+    "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get"],
+    "confirmActions": [],
+    "denyActions": ["eval", "click", "fill", "submit", "upload", "download", "network", "state"]
+  },
+  "presentation": {
+    "browserVisible": true
+  },
+  "progress": {
+    "label": "Structured extraction",
+    "detail": "Collects requested fields with source provenance"
+  }
+}

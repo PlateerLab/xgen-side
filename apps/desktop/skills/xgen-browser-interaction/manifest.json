@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.browser-interaction",
+  "settingKey": "global:browser-interaction",
+  "category": "Browser",
+  "domain": "Visible XGEN browser",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["browser-agent"],
+    "intents": ["click", "fill", "type", "select", "check", "press", "web-app-operation"],
+    "signals": ["click", "fill", "type", "select", "check", "press", "choose", "클릭", "입력", "작성", "선택", "체크", "눌러"]
+  },
+  "runtime": {
+    "kind": "agent-browser",
+    "capability": "browser-control",
+    "adapter": "agent-browser",
+    "server": "xgen_browser",
+    "toolProfiles": ["core", "tabs"],
+    "tools": ["agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_select", "agent_browser_check", "agent_browser_uncheck", "agent_browser_wait_for_selector", "agent_browser_wait_for_text", "agent_browser_wait_for_load"]
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get", "click", "fill", "interact"],
+    "confirmActions": ["submit"],
+    "denyActions": ["eval", "upload", "download", "network", "state", "purchase", "send", "publish", "delete"]
+  },
+  "presentation": {
+    "browserVisible": true
+  },
+  "progress": {
+    "label": "Browser interaction",
+    "detail": "Interacts with visible controls through fresh accessibility refs"
+  }
+}

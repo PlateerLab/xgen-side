@@ -1,0 +1,7 @@
+interface:
+  display_name: "Form Guard"
+  short_description: "Guard consequential browser form actions"
+  default_prompt: "Use $xgen-form-guard to review and safely prepare this form."
+
+policy:
+  allow_implicit_invocation: true

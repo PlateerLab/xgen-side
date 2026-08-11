@@ -1,0 +1,7 @@
+interface:
+  display_name: "Web Research"
+  short_description: "Research current information with sources"
+  default_prompt: "Use $xgen-web-research to research this topic and cite sources."
+
+policy:
+  allow_implicit_invocation: true

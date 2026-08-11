@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.conversation",
+  "settingKey": "global:conversation",
+  "category": "Core",
+  "domain": "Every request",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "primary",
+    "modes": ["chat"],
+    "intents": ["stable-answer", "writing", "summarization", "no-web"],
+    "signals": ["without web", "do not search", "offline only", "웹 없이", "검색하지 마", "브라우저 없이"]
+  },
+  "runtime": {
+    "kind": "llm",
+    "capability": "conversation",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "read",
+    "allowActions": [],
+    "confirmActions": [],
+    "denyActions": ["web-search", "browser-control"]
+  },
+  "progress": {
+    "label": "Answering",
+    "detail": "Uses conversation context without external tools"
+  }
+}

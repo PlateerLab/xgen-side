@@ -1,0 +1,14 @@
+interface:
+  display_name: "Browser Interaction"
+  short_description: "Click, type, and select in browser pages"
+  default_prompt: "Use $xgen-browser-interaction to complete this browser interaction."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "xgen_browser"
+      description: "Visible XGEN Side browser interaction backed by agent-browser"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

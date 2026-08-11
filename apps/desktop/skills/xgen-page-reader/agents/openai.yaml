@@ -1,0 +1,7 @@
+interface:
+  display_name: "Page Reader"
+  short_description: "Read and answer from the attached page"
+  default_prompt: "Use $xgen-page-reader to answer from the current page."
+
+policy:
+  allow_implicit_invocation: true

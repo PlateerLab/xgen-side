@@ -1,0 +1,7 @@
+interface:
+  display_name: "Multi-page Research"
+  short_description: "Compare multiple sources with a source ledger"
+  default_prompt: "Use $xgen-multi-page-research to compare these sources and produce a verified synthesis."
+
+policy:
+  allow_implicit_invocation: true

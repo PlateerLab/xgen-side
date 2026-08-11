@@ -1,4 +1,4 @@
-import type { BrowserTabState, ProviderStatus, XgenSideApi } from '../../shared/contracts';
+import type { BrowserTabState, ProviderStatus, RoutedSkill, SkillCatalogEntry, XgenSideApi } from '../../shared/contracts';
 
 const previewProviders: ProviderStatus[] = [
   {
@@ -11,6 +11,7 @@ const previewProviders: ProviderStatus[] = [
     subscriptionAuth: true,
     version: 'codex 1.0.0',
     models: [{ id: 'gpt-5.6-sol', label: '5.6 Sol' }],
+    supportsReasoningEffort: true,
   },
   {
     id: 'claude',
@@ -27,6 +28,57 @@ const previewProviders: ProviderStatus[] = [
 ];
 
 const previewWindow = window as unknown as { xgenSide?: XgenSideApi };
+
+function previewRoutedSkill(id: string, settingKey: string, name: string, description: string, risk: RoutedSkill['risk'], kind: RoutedSkill['runtime']['kind']): RoutedSkill {
+  return {
+    id,
+    settingKey,
+    name,
+    description,
+    domain: kind === 'agent-browser' ? 'Visible XGEN browser' : 'Every request',
+    risk,
+    runtime: { kind, capability: id, toolProfiles: kind === 'agent-browser' ? ['core', 'tabs'] : undefined, tools: [] },
+    permissions: { risk, allowActions: [], confirmActions: [], denyActions: [] },
+    progress: { label: name, detail: description },
+  };
+}
+
+function previewCatalogEntry(
+  id: string,
+  name: string,
+  description: string,
+  category: string,
+  domain: string,
+  kind: SkillCatalogEntry['runtime']['kind'],
+  risk: SkillCatalogEntry['permissions']['risk'],
+): SkillCatalogEntry {
+  const folder = id.replace('.', '-');
+  return {
+    id,
+    settingKey: `global:${id.replace('xgen.', '')}`,
+    name,
+    description,
+    category,
+    domain,
+    enabledByDefault: true,
+    source: `${folder}/SKILL.md`,
+    markdown: `---\nname: ${folder}\ndescription: ${description}\n---\n\n# ${name}\n\n${description}\n\n## Runtime\n\n- Kind: \`${kind}\`\n- Risk: \`${risk}\`\n`,
+    runtime: { kind, capability: id, toolProfiles: kind === 'agent-browser' ? ['core', 'tabs'] : undefined, tools: [] },
+    permissions: { risk, allowActions: [], confirmActions: [], denyActions: [] },
+    progress: { label: name, detail: description },
+  };
+}
+
+const previewCatalog: SkillCatalogEntry[] = [
+  previewCatalogEntry('xgen.conversation', 'Conversation', 'Answer without web or browser tools.', 'Core', 'Every request', 'llm', 'read'),
+  previewCatalogEntry('xgen.web-research', 'Web Research', 'Research current information with cited sources.', 'Research', 'Public web', 'provider-web', 'read'),
+  previewCatalogEntry('xgen.multi-page-research', 'Multi-page Research', 'Compare independent sources with a bounded source ledger.', 'Research', 'Public web', 'provider-web', 'read'),
+  previewCatalogEntry('xgen.page-reader', 'Page Reader', 'Read and answer from the attached page.', 'Research', 'Active browser page', 'page-context', 'read'),
+  previewCatalogEntry('xgen.browser-navigation', 'Browser Navigation', 'Open pages and navigate browser tabs safely.', 'Browser', 'Visible XGEN browser', 'agent-browser', 'write'),
+  previewCatalogEntry('xgen.browser-interaction', 'Browser Interaction', 'Click, type, and select visible controls.', 'Browser', 'Visible XGEN browser', 'agent-browser', 'write'),
+  previewCatalogEntry('xgen.structured-extraction', 'Structured Extraction', 'Extract structured data with provenance.', 'Research', 'Attached or visible browser page', 'agent-browser', 'read'),
+  previewCatalogEntry('xgen.form-guard', 'Form Guard', 'Guard consequential browser form actions.', 'Safety', 'Consequential browser actions', 'policy', 'consequential'),
+];
 
 if (!previewWindow.xgenSide) {
   let tabs: BrowserTabState[] = [];
@@ -51,18 +103,38 @@ if (!previewWindow.xgenSide) {
     },
     agent: {
       run: async () => ({ sessionId: 'preview-session', state: 'completed', answer: 'Preview response', durationMs: 0, logDirectory: 'preview' }),
+      start: (request, listener) => {
+        const id = crypto.randomUUID();
+        const sessionId = 'preview-session';
+        const at = new Date().toISOString();
+        listener?.({ type: 'run-started', sessionId, at });
+        listener?.({ type: 'provider-started', sessionId, at, providerId: request.providerId, model: request.model, sandbox: 'preview' });
+        listener?.({ type: 'text', sessionId, at, text: 'Preview response', mode: 'replace' });
+        listener?.({ type: 'run-finished', sessionId, at, state: 'completed', durationMs: 0 });
+        return {
+          id,
+          result: Promise.resolve({ sessionId, state: 'completed', answer: 'Preview response', durationMs: 0, logDirectory: 'preview' }),
+          cancel: async () => false,
+        };
+      },
     },
     skills: {
+      list: async () => previewCatalog,
       route: async (request) => {
         const matchedUrl = request.prompt.match(/https?:\/\/[^\s]+/)?.[0];
-        const browserRequired = Boolean(matchedUrl || /브라우저|사이트|페이지.*열|추출|수집|\b(open|navigate|extract|scrape)\b/i.test(request.prompt));
-        if (!browserRequired) {
+        const resolvedMode = request.mode === 'auto'
+          ? (/latest|today|search|find|최신|오늘|검색|찾아/i.test(request.prompt) ? 'search' : 'chat')
+          : request.mode;
+        const browserVisible = resolvedMode === 'search' || resolvedMode === 'browser-agent';
+        if (!browserVisible) {
           return {
             id: crypto.randomUUID(),
+            resolvedMode: resolvedMode === 'page' ? 'page' : 'chat',
             reason: 'Conversation Skill이 요청에 가장 적합합니다.',
-            browserRequired: false,
+            browserVisible: false,
+            agentBrowserRequired: false,
             browserActionCategories: [],
-            skills: [{ id: 'xgen.chat-answer', settingKey: 'global:chat-answer', name: 'Conversation', description: '브라우저나 외부 도구 없이 요청에 답합니다.', domain: 'Every website', risk: 'read' }],
+            skills: [previewRoutedSkill('xgen.conversation', 'global:conversation', 'Conversation', '브라우저나 외부 도구 없이 요청에 답합니다.', 'read', 'llm')],
             steps: [
               { id: 'route', label: 'Select skills', detail: 'Conversation', kind: 'route' },
               { id: 'result', label: 'Return result', detail: 'Save the run trace locally', kind: 'result' },
@@ -74,14 +146,16 @@ if (!previewWindow.xgenSide) {
         try { host = new URL(url).hostname; } catch { /* Keep the preview host. */ }
         return {
           id: crypto.randomUUID(),
+          resolvedMode: resolvedMode === 'search' ? 'search' : 'browser-agent',
           reason: `${host} 작업이 필요해 Browser navigation, Structured extraction Skill을 선택했습니다.`,
-          browserRequired: true,
+          browserVisible: true,
+          agentBrowserRequired: resolvedMode !== 'search',
           targetUrl: url,
           targetHost: host,
           browserActionCategories: ['navigate', 'snapshot', 'scroll', 'wait', 'read', 'get'],
           skills: [
-            { id: 'xgen.browser-navigate', settingKey: 'global:browser-navigation', name: 'Browser navigation', description: '탭을 열고 URL로 이동하며 페이지 상태를 확인합니다.', domain: 'Every website', risk: 'write' },
-            { id: 'xgen.data-extract', settingKey: 'global:data-extraction', name: 'Structured extraction', description: '페이지에서 요청한 정보를 구조화합니다.', domain: 'Every website', risk: 'read' },
+            previewRoutedSkill('xgen.browser-navigation', 'global:browser-navigation', 'Browser navigation', '탭을 열고 URL로 이동하며 페이지 상태를 확인합니다.', 'write', 'agent-browser'),
+            previewRoutedSkill('xgen.structured-extraction', 'global:structured-extraction', 'Structured extraction', '페이지에서 요청한 정보를 구조화합니다.', 'read', 'agent-browser'),
           ],
           steps: [
             { id: 'route', label: 'Select skills', detail: 'Browser navigation, Structured extraction', kind: 'route' },
@@ -93,8 +167,11 @@ if (!previewWindow.xgenSide) {
       },
     },
     localData: {
-      status: async () => ({ root: 'C:\\Users\\USER\\AppData\\Roaming\\xgen-side\\agent-data', sessionsRoot: 'preview' }),
+      status: async () => ({ root: 'C:\\Users\\USER\\AppData\\Roaming\\xgen-side\\agent-data', sessionsRoot: 'preview', memoryRoot: 'preview\\memory' }),
       open: async () => '',
+      listMarkdown: async () => [{ id: 'MEMORY.md', name: 'MEMORY.md', relativePath: 'MEMORY.md', category: 'root', updatedAt: new Date().toISOString(), size: 180 }],
+      readMarkdown: async () => '# Browser Agent Memory\n\nBrowser history and task results appear here.',
+      writeMarkdown: async () => undefined,
     },
     settings: {
       load: async () => ({

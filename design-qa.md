@@ -1,64 +1,36 @@
-# XGEN Side Liquid Glass Design QA
+# Design QA
 
-## Evidence
+## Scope
 
-- Source visual truth: `artifacts/figma-liquid-glass-audit/01-macos27-kit-node-121-18094.png`
-- Source material detail: `artifacts/figma-liquid-glass-audit/02-macos27-kit-100-percent.png`
-- Implementation home: `artifacts/liquid-glass-home-dark-1280.png`
-- Implementation browser and Agent panel: `artifacts/liquid-glass-browser-dark-final.png`
-- Light theme implementation: `artifacts/liquid-glass-home-light.png`
-- Settings implementation: `artifacts/liquid-glass-settings-dark.png`
-- Full comparison: `artifacts/design-qa-full-comparison.png`
-- Focused comparison: `artifacts/design-qa-focused-comparison.png`
+- References: the Aside desktop screenshots supplied by the user, including the browser-workflow reference for this iteration.
+- Implementation: Auto routing, reasoning effort, event-driven browser screenshots, collapsible run detail, Skills workbench, MCP workbench, and Browser Agent Memory.
+- Auto screenshot capture: `artifacts/xgen-side-auto-snapshots.png`.
+- Skills capture: `artifacts/xgen-side-skills.png`.
+- Memory capture: `artifacts/xgen-side-memory-populated.png`.
+- Combined comparisons: `artifacts/qa-auto-snapshots-comparison.png`, `artifacts/qa-chat-comparison.png`, and `artifacts/qa-settings-comparison.png`.
 
-## Normalization
+## Comparison findings
 
-- Full comparison viewport: 1280 × 720 CSS pixels at device scale factor 1.
-- Source overview pixels: 1280 × 720.
-- Normalized implementation pixels: 1280 × 720.
-- Browser and Agent panel evidence pixels: 1484 × 921 at device scale factor 1.
-- State: dark theme, home screen, browser workspace with the Agent panel open, and General settings.
-- The Figma source is a UI kit rather than an XGEN Side screen mock. Layout fidelity is therefore evaluated against the existing XGEN Side information architecture, while material, border, depth, selected state, and control treatment are compared directly.
+- Auto layout: Passed. The conversation and run timeline occupy the center while browser-backed work opens an event screenshot rail on the right.
+- Run detail: Passed. The current activity is compact by default and expands to show routed skills, permission level, task steps, and browser capture state.
+- Mode boundaries: Passed. Auto chooses the smallest capability required. Optional No web, Research, Ask page, and Browser work boundaries remain available.
+- Browser capture: Passed. The native Electron browser stays detached between events, appears only for the capture interval, and unchanged screenshots are deduplicated.
+- Reasoning effort: Passed. Codex exposes Auto, Fast, Balanced, Deep, and Very Deep. Unsupported providers show their own default without a nonfunctional control.
+- Settings hierarchy: Passed. Skills, MCP, and Local data add a second file-explorer sidebar without replacing the primary settings navigation.
+- Markdown workbench: Passed. Skill and MCP definitions have Preview and Source views. Memory files add editable source, line numbers, save state, and rendered Markdown.
+- Memory scope: Passed. Only Browser Agent runs create `browser-history/` and `task-results/` Markdown files. Chat, Search, and Ask page remain excluded.
+- Visual fidelity: Passed. The dense three-column settings structure, large document canvas, subdued chrome, typography hierarchy, borders, and elevation track the Aside references while retaining XGEN Side tokens.
+- Icons and assets: Passed. Existing Fluent UI icons and the real browser surface are used. No fabricated image placeholders or inline SVG assets were introduced.
+- Interaction: Passed. Auto routing, reasoning selection, run detail dropdown, screenshot rail, Settings resource navigation, Preview and Source tabs, Markdown editing, Save, and process stop controls are wired.
+- Accessibility: Passed. Automated axe audit reports 0 violations and 0 incomplete checks.
 
-## Full View Comparison
+## Engineering verification
 
-The implementation retains the existing three-surface XGEN Side structure while adopting the source kit's floating material hierarchy. The left navigation is visually separated from the content canvas, the Composer is a distinct elevated material, and selected states use the XGEN accent without tinting every surface.
-
-## Focused Region Comparison
-
-The focused comparison evaluates the Figma dark menu against the XGEN Side Agent panel. Both use a neutral dark translucent surface, a fine light edge, restrained internal separators, rounded corners, and a saturated blue selected or active state. XGEN Side intentionally uses a more opaque panel than the menu reference because it overlays arbitrary live browser content and must preserve text contrast.
-
-## Required Fidelity Surfaces
-
-- Fonts and typography: Segoe UI Variable and system fallbacks preserve the existing Windows-first hierarchy. Weight, line height, truncation, and small control labels remain readable in both themes.
-- Spacing and layout rhythm: floating panels use a consistent 12 pixel outer gap, 18 to 22 pixel radii, and aligned internal spacing. No persistent controls are cropped at 1280 × 720 or 1484 × 921.
-- Colors and visual tokens: neutral Glass surfaces, light inner edges, depth shadows, and the `#305EEB` XGEN accent match the source material principles. Light and dark variants were captured and inspected.
-- Image quality and asset fidelity: the source does not require product imagery. Existing Fluent UI icons are retained; no substitute CSS drawings, custom SVGs, or placeholder imagery were introduced.
-- Copy and content: existing XGEN Side navigation, provider, model, mode, Agent, and settings copy is preserved.
-
-## Findings
-
-No actionable P0, P1, or P2 findings remain.
-
-## Comparison History
-
-### Iteration 1
-
-- Finding: P2 Agent Composer overflow in the 348 pixel right panel.
-- Evidence: `artifacts/liquid-glass-browser-dark.png` showed the Mode control crossing the panel's left boundary.
-- Fix: removed attachment and voice controls from the constrained page Composer, tightened the Mode, Provider, and Model widths, and aligned the remaining options within the input surface.
-- Post-fix evidence: `artifacts/liquid-glass-browser-dark-final.png` shows all controls contained inside the panel.
-
-### Iteration 2
-
-- Verification: the final 1280 × 720 home capture, dark browser capture, light home capture, and settings capture show no overflow, clipped persistent controls, broken text wrapping, or contrast regressions.
-- Interactions tested: light and dark theme switching, opening a browser session, opening the XGEN Side Agent panel, and opening Settings.
-- Console check: the running Electron development process reported the expected Vite hot update and no renderer error.
-
-## Follow-up Polish
-
-- P3: Windows Mica and macOS Vibrancy are native compositor effects and are not visible in the renderer-only CDP screenshots. The CSS fallback is visible and verified; native material should also be checked on packaged Windows 11 and macOS builds before release.
-
-## Final Result
+- `pnpm typecheck:xgen-side`: passed.
+- `pnpm test:xgen-side`: passed, 26 of 26 tests.
+- Windows cancellation: passed. A long Browser Agent run was stopped from the UI and the composer became available again within two seconds.
+- Browser Agent persistence: passed. A real run created daily browser history and per-task result Markdown files visible in Settings.
+- Fast research path: passed. A real Seoul weather request opened Bing immediately, completed without starting the browser MCP daemon, and returned a sourced answer in about 15 seconds instead of remaining blocked for more than a minute.
+- Updated layout: passed. The primary sidebar is 288 pixels wide, the browser capture rail is 520 pixels wide, and the default desktop window opens at 1680 by 1040.
 
 final result: passed

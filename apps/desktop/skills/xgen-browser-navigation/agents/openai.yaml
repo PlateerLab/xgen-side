@@ -1,0 +1,14 @@
+interface:
+  display_name: "Browser Navigation"
+  short_description: "Open pages and navigate browser tabs safely"
+  default_prompt: "Use $xgen-browser-navigation to open this page and inspect it."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "xgen_browser"
+      description: "Visible XGEN Side browser control backed by agent-browser"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

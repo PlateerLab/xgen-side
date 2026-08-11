@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +18,7 @@ const commands = {
     'src/main/security/policy-engine.test.ts',
     'src/main/command/command-broker.test.ts',
     'src/main/provider/provider-adapter.test.ts',
+    'src/main/provider/provider-runtime.test.ts',
     'src/main/skills/skill-router.test.ts',
   ],
 };
@@ -28,6 +30,14 @@ if (!args) {
 }
 
 const [entry, ...entryArgs] = args;
+const pnpmStore = join(repositoryRoot, 'node_modules', '.pnpm');
+if (!process.env.ELECTRON_EXEC_PATH && existsSync(pnpmStore)) {
+  const electronPackage = readdirSync(pnpmStore).find((name) => /^electron@\d+\.\d+\.\d+$/.test(name));
+  const electronExecutable = electronPackage
+    ? join(pnpmStore, electronPackage, 'node_modules', 'electron', 'dist', 'electron.exe')
+    : '';
+  if (electronExecutable && existsSync(electronExecutable)) process.env.ELECTRON_EXEC_PATH = electronExecutable;
+}
 const result = spawnSync(process.execPath, [entry, ...entryArgs], {
   cwd: desktopRoot,
   env: process.env,

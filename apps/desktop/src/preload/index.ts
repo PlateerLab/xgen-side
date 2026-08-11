@@ -4,14 +4,39 @@ import type {
   BrowserLayoutState,
   CommandRequest,
   CommandResult,
+  AgentRunEvent,
+  AgentRunHandle,
   AgentRunRequest,
   AgentRunResult,
   AppSettings,
   LocalDataStatus,
+  LocalMarkdownFile,
   ProviderId,
   ProviderStatus,
   XgenSideApi,
 } from '../shared/contracts';
+
+let runSequence = 0;
+const runListeners = new Map<string, (event: AgentRunEvent) => void>();
+
+ipcRenderer.on('agent:run-event', (_event, envelope: { requestId: string; event: AgentRunEvent }) => {
+  runListeners.get(envelope.requestId)?.(envelope.event);
+});
+
+function startAgentRun(
+  request: AgentRunRequest,
+  listener?: (event: AgentRunEvent) => void,
+): AgentRunHandle {
+  const id = `renderer-${Date.now()}-${++runSequence}`;
+  if (listener) runListeners.set(id, listener);
+  const result = (ipcRenderer.invoke('agent:run', request, id) as Promise<AgentRunResult>)
+    .finally(() => setTimeout(() => runListeners.delete(id), 0));
+  return {
+    id,
+    result,
+    cancel: () => ipcRenderer.invoke('agent:cancel', id),
+  };
+}
 
 const api: XgenSideApi = {
   engine: {
@@ -40,13 +65,18 @@ const api: XgenSideApi = {
   },
   agent: {
     run: (request: AgentRunRequest): Promise<AgentRunResult> => ipcRenderer.invoke('agent:run', request),
+    start: startAgentRun,
   },
   skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
     route: (request: AgentRunRequest) => ipcRenderer.invoke('skills:route', request),
   },
   localData: {
     status: (): Promise<LocalDataStatus> => ipcRenderer.invoke('local-data:status'),
     open: (): Promise<string> => ipcRenderer.invoke('local-data:open'),
+    listMarkdown: (): Promise<LocalMarkdownFile[]> => ipcRenderer.invoke('local-data:list-markdown'),
+    readMarkdown: (relativePath: string): Promise<string> => ipcRenderer.invoke('local-data:read-markdown', relativePath),
+    writeMarkdown: (relativePath: string, content: string): Promise<void> => ipcRenderer.invoke('local-data:write-markdown', relativePath, content),
   },
   settings: {
     load: (): Promise<AppSettings> => ipcRenderer.invoke('settings:load'),

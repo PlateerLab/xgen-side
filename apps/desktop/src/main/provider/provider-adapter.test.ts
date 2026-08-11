@@ -15,6 +15,18 @@ test('Codex adapter extracts the final agent message from JSONL', () => {
   assert.equal(adapter.parseAnswer(output), 'final answer');
 });
 
+test('Codex adapter normalizes live text and MCP activity events', () => {
+  const adapter = new CodexAdapter(unusedStore);
+  assert.deepEqual(adapter.parseStreamLine(JSON.stringify({
+    type: 'item.started',
+    item: { type: 'mcp_tool_call', server: 'xgen_browser', tool: 'navigate' },
+  })), [{ type: 'activity', name: 'xgen_browser.navigate', phase: 'started', detail: undefined }]);
+  assert.deepEqual(adapter.parseStreamLine(JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: 'live answer' },
+  })), [{ type: 'text', text: 'live answer', mode: 'replace' }]);
+});
+
 test('Claude adapter prefers the final result from stream JSON', () => {
   const adapter = new ClaudeCodeAdapter(unusedStore);
   const output = [
@@ -31,4 +43,12 @@ test('Claude adapter falls back to assistant text when no result event is presen
     message: { content: [{ type: 'text', text: 'answer from assistant event' }] },
   });
   assert.equal(adapter.parseAnswer(output), 'answer from assistant event');
+});
+
+test('Claude adapter normalizes partial text deltas', () => {
+  const adapter = new ClaudeCodeAdapter(unusedStore);
+  assert.deepEqual(adapter.parseStreamLine(JSON.stringify({
+    type: 'stream_event',
+    event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } },
+  })), [{ type: 'text', text: 'partial', mode: 'append' }]);
 });

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.web-research",
+  "settingKey": "global:web-research",
+  "category": "Research",
+  "domain": "Public web",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "primary",
+    "modes": ["search"],
+    "intents": ["current-information", "web-search", "verify", "recommendation", "sources"],
+    "signals": ["latest", "today", "current", "recent", "news", "weather", "price", "schedule", "source", "verify", "research", "search", "find", "look up", "browse", "최신", "오늘", "현재", "최근", "뉴스", "날씨", "가격", "일정", "출처", "검증", "조사", "검색", "찾아"]
+  },
+  "runtime": {
+    "kind": "provider-web",
+    "capability": "web-search",
+    "tools": ["provider_web_search", "electron_search_context"]
+  },
+  "permissions": {
+    "risk": "read",
+    "allowActions": ["search", "read"],
+    "confirmActions": [],
+    "denyActions": ["browser-control", "click", "fill", "submit"]
+  },
+  "presentation": {
+    "browserVisible": false
+  },
+  "progress": {
+    "label": "Web research",
+    "detail": "Searches current sources without browser interaction"
+  }
+}

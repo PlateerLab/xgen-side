@@ -13,43 +13,146 @@ const baseRequest: AgentRunRequest = {
 
 test('routes ordinary chat without exposing browser actions', async () => {
   const route = await router().route(baseRequest);
-  assert.equal(route.browserRequired, false);
+  assert.equal(route.browserVisible, false);
+  assert.equal(route.agentBrowserRequired, false);
   assert.deepEqual(route.browserActionCategories, []);
-  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.chat-answer']);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.conversation']);
 });
 
-test('routes URL extraction through navigation and extraction skills', async () => {
+test('keeps URL prompts in chat isolated from the browser', async () => {
   const route = await router().route({
     ...baseRequest,
     prompt: 'https://example.com/pricing 페이지를 열고 가격을 JSON으로 추출해줘',
   });
-  assert.equal(route.browserRequired, true);
-  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.browser-navigate', 'xgen.data-extract']);
-  assert.equal(route.browserActionCategories.includes('navigate'), true);
-  assert.equal(route.browserActionCategories.includes('get'), true);
+  assert.equal(route.agentBrowserRequired, false);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.conversation']);
+});
+
+test('auto keeps stable questions in conversation mode', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '마크다운 표 만드는 법 알려줘' });
+  assert.equal(route.resolvedMode, 'chat');
+  assert.equal(route.agentBrowserRequired, false);
+});
+
+test('auto selects read-only research for current information', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '오늘 서울 날씨를 찾아줘' });
+  assert.equal(route.resolvedMode, 'search');
+  assert.equal(route.browserVisible, false);
+  assert.equal(route.agentBrowserRequired, false);
   assert.equal(route.browserActionCategories.includes('fill'), false);
 });
 
-test('adds form guard only for interactive browser requests', async () => {
+test('auto honors an explicit no-web boundary', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '웹 없이 이 문장을 요약해줘' });
+  assert.equal(route.resolvedMode, 'chat');
+  assert.equal(route.agentBrowserRequired, false);
+});
+
+test('auto selects browser work for interaction requests without attached page context', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: 'example.com을 열어줘' });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.equal(route.agentBrowserRequired, true);
+});
+
+test('auto recognizes the Korean connective form for browser navigation', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: 'example.com을 열고 페이지 제목을 알려줘' });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.equal(route.agentBrowserRequired, true);
+});
+
+test('auto uses the attached page for ordinary page questions', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '핵심 내용을 요약해줘', pageContext: pageContext('https://example.com') });
+  assert.equal(route.resolvedMode, 'page');
+  assert.equal(route.agentBrowserRequired, false);
+});
+
+test('routes research through provider web search without agent-browser', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'search', prompt: '오늘 서울 날씨를 찾아줘' });
+  assert.equal(route.browserVisible, false);
+  assert.equal(route.agentBrowserRequired, false);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.web-research']);
+  assert.deepEqual(route.browserActionCategories, []);
+});
+
+test('adds bounded multi-page research for cross-source requests', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '이 주제를 여러 출처로 교차 검증해서 리서치 보고서로 만들어줘' });
+  assert.equal(route.resolvedMode, 'search');
+  assert.equal(route.browserVisible, false);
+  assert.equal(route.agentBrowserRequired, false);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.multi-page-research', 'xgen.web-research']);
+  const instructions = router().instructionsFor(route);
+  assert.match(instructions, /<skill name="xgen\.multi-page-research">/);
+  assert.match(instructions, /<skill_resource path="references\/source-ledger\.md">/);
+});
+
+test('routes Browser Agent extraction through navigation and extraction skills', async () => {
   const route = await router().route({
     ...baseRequest,
-    prompt: 'https://example.com/form 을 열고 이름을 입력해줘',
+    mode: 'browser-agent',
+    prompt: '현재 페이지 가격을 JSON으로 추출해줘',
+    pageContext: pageContext('https://example.com/pricing'),
   });
-  assert.equal(route.skills.some((skill) => skill.id === 'xgen.form-guard'), true);
+  assert.equal(route.agentBrowserRequired, true);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.browser-navigation', 'xgen.structured-extraction']);
+});
+
+test('adds interaction tools without a consequential guard for reversible input', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'browser-agent',
+    prompt: '현재 폼에 이름을 입력해줘',
+    pageContext: pageContext('https://example.com/form'),
+  });
+  assert.equal(route.skills.some((skill) => skill.id === 'xgen.browser-interaction'), true);
+  assert.equal(route.skills.some((skill) => skill.id === 'xgen.form-guard'), false);
   assert.equal(route.browserActionCategories.includes('fill'), true);
   assert.equal(route.browserActionCategories.includes('click'), true);
+});
+
+test('adds form guard when a consequential browser action is requested', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'browser-agent',
+    prompt: '현재 폼을 제출해줘',
+    pageContext: pageContext('https://example.com/form'),
+  });
+  assert.equal(route.skills.some((skill) => skill.id === 'xgen.form-guard'), true);
 });
 
 test('blocks browser execution when every required browser skill is disabled', async () => {
   const route = await router({
     'global:browser-navigation': false,
-    'global:data-extraction': false,
+    'global:structured-extraction': false,
   }).route({
     ...baseRequest,
-    prompt: 'https://example.com 에서 가격을 추출해줘',
+    mode: 'browser-agent',
+    prompt: '현재 페이지에서 가격을 추출해줘',
+    pageContext: pageContext('https://example.com'),
   });
-  assert.equal(route.browserRequired, false);
+  assert.equal(route.agentBrowserRequired, false);
   assert.ok(route.blockedReason);
+});
+
+test('loads the real Skill packages and their runtime bindings', () => {
+  const catalog = router().list();
+  assert.equal(catalog.length, 8);
+  assert.equal(catalog.find((skill) => skill.id === 'xgen.web-research')?.runtime.kind, 'provider-web');
+  assert.deepEqual(catalog.find((skill) => skill.id === 'xgen.browser-navigation')?.runtime.toolProfiles, ['core', 'tabs']);
+  assert.match(catalog.find((skill) => skill.id === 'xgen.form-guard')?.markdown ?? '', /## Workflow/);
+});
+
+test('injects selected Skill workflows and reference contracts into provider context', async () => {
+  const skillRouter = router();
+  const route = await skillRouter.route({
+    ...baseRequest,
+    mode: 'browser-agent',
+    prompt: '현재 페이지 가격을 JSON으로 추출해줘',
+    pageContext: pageContext('https://example.com/pricing'),
+  });
+  const instructions = skillRouter.instructionsFor(route);
+  assert.match(instructions, /<skill name="xgen\.browser-navigation">/);
+  assert.match(instructions, /<skill_resource path="references\/tool-contract\.md">/);
+  assert.match(instructions, /<skill_resource path="references\/output-contract\.md">/);
 });
 
 function router(skillEnabled: Record<string, boolean> = {}): SkillRouter {
@@ -60,4 +163,8 @@ function router(skillEnabled: Record<string, boolean> = {}): SkillRouter {
     skillEnabled,
   };
   return new SkillRouter({ load: async () => settings } as LocalSettingsStore);
+}
+
+function pageContext(url: string) {
+  return { tabId: 'tab-1', title: 'Example', url, selection: '', text: 'Example page', capturedAt: new Date().toISOString() };
 }

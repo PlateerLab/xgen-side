@@ -1,8 +1,8 @@
-import { writeFile } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
 import { LocalRunStore, type RunSession } from '../storage/local-run-store';
-import type { BrowserBridge, ProviderAdapter, ProviderRunPlan } from './provider-adapter';
+import type { BrowserBridge, ProviderAdapter, ProviderRunPlan, ProviderStreamEvent } from './provider-adapter';
 import { authError, collect, launchLoginTerminal, locateNativeExecutable, safeEnvironment } from './provider-runtime';
 
 const models = [
@@ -33,6 +33,7 @@ export class CodexAdapter implements ProviderAdapter {
       version: executable?.version,
       executablePath: executable?.path,
       models,
+      supportsReasoningEffort: true,
       error: executable ? authError(auth, 'ChatGPT 로그인이 필요합니다.') : 'Codex CLI를 찾지 못했습니다.',
     };
   }
@@ -41,7 +42,7 @@ export class CodexAdapter implements ProviderAdapter {
     const executable = await this.locate();
     if (!executable) return { launched: false, message: 'Codex CLI를 먼저 설치해 주세요.' };
     const home = await this.prepareHome();
-    launchLoginTerminal({
+    await launchLoginTerminal({
       executablePath: executable.path,
       args: ['login'],
       cwd: home,
@@ -66,13 +67,17 @@ export class CodexAdapter implements ProviderAdapter {
       '--cd', session.workspace,
       '--skip-git-repo-check',
     ];
+    if (request.reasoningEffort && request.reasoningEffort !== 'auto') {
+      args.push('-c', `model_reasoning_effort=${JSON.stringify(request.reasoningEffort)}`);
+    }
     if (request.mode === 'search') args.push('-c', 'web_search="live"');
     const extraEnvironment: Record<string, string> = { CODEX_HOME: home };
 
     if (browser) {
+      const toolProfiles = browser.toolProfiles.join(',') || 'core';
       args.push(
         '-c', `mcp_servers.xgen_browser.command=${tomlString(browser.executablePath)}`,
-        '-c', 'mcp_servers.xgen_browser.args=["mcp","--tools","core,tabs"]',
+        '-c', `mcp_servers.xgen_browser.args=["mcp","--tools",${tomlString(toolProfiles)}]`,
         '-c', `mcp_servers.xgen_browser.env=${tomlInlineTable(browser.environment)}`,
       );
       Object.assign(extraEnvironment, browser.environment);
@@ -103,6 +108,34 @@ export class CodexAdapter implements ProviderAdapter {
     return answer.trim();
   }
 
+  parseStreamLine(line: string): ProviderStreamEvent[] {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+    const item = event.item as Record<string, unknown> | undefined;
+    if (!item) return [];
+    if (event.type === 'item.completed' && item.type === 'agent_message' && typeof item.text === 'string') {
+      return [{ type: 'text', text: item.text, mode: 'replace' }];
+    }
+    if (!['item.started', 'item.updated', 'item.completed'].includes(String(event.type))) return [];
+    if (!['mcp_tool_call', 'command_execution', 'web_search'].includes(String(item.type))) return [];
+    const phase = event.type === 'item.started'
+      ? 'started'
+      : event.type === 'item.completed'
+        ? (item.status === 'failed' ? 'failed' : 'completed')
+        : 'updated';
+    const name = codexActivityName(item);
+    const detail = typeof item.command === 'string'
+      ? item.command
+      : typeof item.query === 'string'
+        ? item.query
+        : undefined;
+    return [{ type: 'activity', name, phase, detail }];
+  }
+
   private async locate(): Promise<{ path: string; version: string } | undefined> {
     const candidates: string[] = [];
     const appData = process.env.APPDATA;
@@ -110,13 +143,25 @@ export class CodexAdapter implements ProviderAdapter {
       const arch = process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
       candidates.push(join(appData, 'npm', 'node_modules', '@openai', 'codex', 'node_modules', `@openai/codex-win32-${process.arch}`, 'vendor', arch, 'codex', 'codex.exe'));
     }
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) {
+      const desktopBinRoot = join(localAppData, 'OpenAI', 'Codex', 'bin');
+      try {
+        const entries = await readdir(desktopBinRoot, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory()) candidates.push(join(desktopBinRoot, entry.name, 'codex.exe'));
+        }
+      } catch {
+        // Codex Desktop is optional. PATH and npm candidates still apply.
+      }
+    }
     return locateNativeExecutable('codex', candidates);
   }
 
   private async prepareHome(): Promise<string> {
     const home = await this.store.ensureProviderHome(this.id);
     await writeFile(join(home, 'config.toml'), [
-      'cli_auth_credentials_store = "keyring"',
+      'cli_auth_credentials_store = "file"',
       'sandbox_mode = "read-only"',
       'approval_policy = "never"',
       'web_search = "cached"',
@@ -124,6 +169,16 @@ export class CodexAdapter implements ProviderAdapter {
     ].join('\n'), 'utf8');
     return home;
   }
+}
+
+function codexActivityName(item: Record<string, unknown>): string {
+  if (item.type === 'mcp_tool_call') {
+    const server = typeof item.server === 'string' ? item.server : 'mcp';
+    const tool = typeof item.tool === 'string' ? item.tool : 'tool';
+    return `${server}.${tool}`;
+  }
+  if (item.type === 'web_search') return 'Web search';
+  return 'Local command';
 }
 
 function tomlString(value: string): string {

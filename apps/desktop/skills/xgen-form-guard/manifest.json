@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.form-guard",
+  "settingKey": "global:form-guard",
+  "category": "Safety",
+  "domain": "Consequential browser actions",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "guard",
+    "modes": ["browser-agent"],
+    "intents": ["submit", "purchase", "send", "publish", "delete", "login", "credential", "upload", "download", "account-change"],
+    "signals": ["submit", "purchase", "buy", "send", "publish", "delete", "login", "sign in", "upload", "download", "제출", "구매", "결제", "전송", "발행", "삭제", "로그인", "업로드", "다운로드", "계정 변경"]
+  },
+  "runtime": {
+    "kind": "policy",
+    "capability": "consequential-action-guard",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "consequential",
+    "allowActions": ["snapshot", "read", "get"],
+    "confirmActions": ["submit", "purchase", "send", "publish", "delete", "upload", "download", "account-change"],
+    "denyActions": ["credential-disclosure", "secret-logging"]
+  },
+  "progress": {
+    "label": "Form guard",
+    "detail": "Stops before consequential browser actions"
+  }
+}
