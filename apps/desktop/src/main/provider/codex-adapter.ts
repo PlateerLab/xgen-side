@@ -140,8 +140,7 @@ export class CodexAdapter implements ProviderAdapter {
     const candidates: string[] = [];
     const appData = process.env.APPDATA;
     if (appData) {
-      const arch = process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
-      candidates.push(join(appData, 'npm', 'node_modules', '@openai', 'codex', 'node_modules', `@openai/codex-win32-${process.arch}`, 'vendor', arch, 'codex', 'codex.exe'));
+      candidates.push(...codexNpmExecutableCandidates(appData, process.arch));
     }
     const localAppData = process.env.LOCALAPPDATA;
     if (localAppData) {
@@ -169,6 +168,31 @@ export class CodexAdapter implements ProviderAdapter {
     ].join('\n'), 'utf8');
     return home;
   }
+}
+
+export function codexNpmExecutableCandidates(appData: string, architecture: NodeJS.Architecture): string[] {
+  const packageArchitecture = architecture === 'arm64' ? 'arm64' : 'x64';
+  const target = architecture === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
+  const vendorRoot = join(
+    appData,
+    'npm',
+    'node_modules',
+    '@openai',
+    'codex',
+    'node_modules',
+    `@openai/codex-win32-${packageArchitecture}`,
+    'vendor',
+    target,
+  );
+  return [
+    join(vendorRoot, 'bin', 'codex.exe'),
+    join(vendorRoot, 'codex', 'codex.exe'),
+  ];
+}
+
+export function codexCompatibilityError(stderr: string): string | undefined {
+  if (!/failed to decode models response/i.test(stderr) || !/unknown variant [`'"]?max/i.test(stderr)) return undefined;
+  return '설치된 Codex CLI가 최신 모델 목록과 호환되지 않습니다. Codex CLI를 최신 버전으로 업데이트한 뒤 Settings > AI Providers에서 상태를 새로고침하세요.';
 }
 
 function codexActivityName(item: Record<string, unknown>): string {

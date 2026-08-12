@@ -17,7 +17,7 @@ import { LocalRunStore, type RunSession } from '../storage/local-run-store';
 import { LocalSettingsStore } from '../storage/local-settings-store';
 import { SkillRouter } from '../skills/skill-router';
 import { ClaudeCodeAdapter } from './claude-code-adapter';
-import { CodexAdapter } from './codex-adapter';
+import { CodexAdapter, codexCompatibilityError } from './codex-adapter';
 import type { BrowserBridge, ProviderAdapter } from './provider-adapter';
 import { collect } from './provider-runtime';
 
@@ -255,6 +255,10 @@ export class ProviderManager {
 
 function providerFailureMessage(providerId: ProviderId, stderr: string): string {
   const detail = stderr.trim();
+  if (providerId === 'codex') {
+    const compatibilityError = codexCompatibilityError(detail);
+    if (compatibilityError) return compatibilityError;
+  }
   if (providerId === 'codex' && /401 Unauthorized|Missing bearer|no Codex credentials|not logged in/i.test(detail)) {
     return 'Codex 인증 정보가 없거나 만료되었습니다. Settings > AI Providers에서 구독 연결을 다시 실행하세요.';
   }
