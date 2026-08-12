@@ -839,8 +839,6 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 }
 .mode-select > svg:last-child { position: absolute; right: 7px; width: 13px; height: 13px; pointer-events: none; }
 .mode-select select { height: 100%; padding: 0 25px 0 0; appearance: none; border: 0; outline: 0; color: var(--text); background: transparent; cursor: pointer; font-size: 10px; font-weight: 720; }
-.reasoning-select select { max-width: 118px; }
-.reasoning-select select:disabled { cursor: default; opacity: 0.65; }
 .composer-tools { min-height: 35px; align-items: center; padding-top: 2px; }
 .composer-context-tools, .composer-options { display: flex; min-width: 0; align-items: center; gap: 3px; }
 .context-chip {

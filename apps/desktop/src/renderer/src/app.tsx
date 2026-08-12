@@ -47,7 +47,6 @@ import type {
   LocalMarkdownFile,
   ProviderId,
   ProviderStatus,
-  ReasoningEffort,
   SkillCatalogEntry,
   SkillRoute,
 } from '../../shared/contracts';
@@ -110,14 +109,6 @@ const pageModes: Array<{ id: AgentMode; label: string }> = [
   { id: 'browser-agent', label: 'Browser agent' },
 ];
 
-const reasoningOptions: Array<{ id: ReasoningEffort; label: string }> = [
-  { id: 'auto', label: 'Reasoning: Auto' },
-  { id: 'low', label: 'Fast' },
-  { id: 'medium', label: 'Balanced' },
-  { id: 'high', label: 'Deep' },
-  { id: 'xhigh', label: 'Very Deep' },
-];
-
 const initialPreferences: AppSettings['general'] = { guard: true, localLogs: true, compact: false };
 
 const mcpDefinitions: McpDefinition[] = [
@@ -159,7 +150,6 @@ export function App(): ReactElement {
   const [model, setModel] = useState('gpt-5.6-sol');
   const [homeMode, setHomeMode] = useState<AgentMode>('auto');
   const [pageMode, setPageMode] = useState<AgentMode>('auto');
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto');
   const [homePrompt, setHomePrompt] = useState('');
   const [pagePrompt, setPagePrompt] = useState('');
   const [homeBusy, setHomeBusy] = useState(false);
@@ -315,7 +305,7 @@ export function App(): ReactElement {
       providerId,
       model,
       mode: homeMode,
-      reasoningEffort,
+      reasoningEffort: 'auto' as const,
       prompt: value,
       history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
     };
@@ -395,7 +385,7 @@ export function App(): ReactElement {
         providerId,
         model,
         mode: pageMode,
-        reasoningEffort,
+        reasoningEffort: 'auto',
         prompt: value,
         pageContext,
         history: pageMessages.map(({ role, content }) => ({ role, content })),
@@ -496,7 +486,6 @@ export function App(): ReactElement {
           onChangeModel={setModel}
           onChangePrompt={setHomePrompt}
           onChangeProvider={changeProvider}
-          onChangeReasoning={setReasoningEffort}
           onCancel={() => void cancelHomeRun()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
           onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
@@ -504,7 +493,6 @@ export function App(): ReactElement {
           prompt={homePrompt}
           providerId={providerId}
           providers={providers}
-          reasoningEffort={reasoningEffort}
           rightWidth={homeDockWidth}
           selectedProvider={selectedProvider}
           tabs={tabs}
@@ -564,14 +552,12 @@ export function App(): ReactElement {
           onChangeModel={setModel}
           onChangePrompt={setPagePrompt}
           onChangeProvider={changeProvider}
-          onChangeReasoning={setReasoningEffort}
           onCancel={() => void cancelPageRun()}
           onClose={() => setRightOpen(false)}
           onSubmit={(event) => void sendPageMessage(event)}
           prompt={pagePrompt}
           providerId={providerId}
           providers={providers}
-          reasoningEffort={reasoningEffort}
           selectedProvider={selectedProvider}
         />
       )}
@@ -687,13 +673,11 @@ interface ConversationSurfaceProps {
   onChangeModel(value: string): void;
   onChangePrompt(value: string): void;
   onChangeProvider(value: ProviderId): void;
-  onChangeReasoning(value: ReasoningEffort): void;
   onCancel(): void;
   onSubmit(event: FormEvent): void;
   prompt: string;
   providerId: ProviderId;
   providers: ProviderStatus[];
-  reasoningEffort: ReasoningEffort;
   selectedProvider?: ProviderStatus;
 }
 
@@ -1161,7 +1145,6 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
         <div className="composer-options">
           <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
           <label className="compact-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
-          <label className="compact-select reasoning-select"><span className="sr-only">추론 강도</span><select value={props.selectedProvider?.supportsReasoningEffort ? props.reasoningEffort : 'auto'} disabled={!props.selectedProvider?.supportsReasoningEffort} onChange={(event) => props.onChangeReasoning(event.target.value as ReasoningEffort)}>{props.selectedProvider?.supportsReasoningEffort ? reasoningOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>) : <option value="auto">Provider default</option>}</select><ChevronDown24Regular /></label>
           <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
           {props.busy && <button type="button" className="send-button stop-button" onClick={props.onCancel} aria-label="실행 중지"><Dismiss24Regular /></button>}
         </div>
