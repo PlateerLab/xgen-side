@@ -115,6 +115,7 @@ if (!previewWindow.xgenSide) {
           id,
           result: Promise.resolve({ sessionId, state: 'completed', answer: 'Preview response', durationMs: 0, logDirectory: 'preview' }),
           cancel: async () => false,
+          respondToApproval: async () => false,
         };
       },
     },
@@ -176,11 +177,19 @@ if (!previewWindow.xgenSide) {
     settings: {
       load: async () => ({
         schemaVersion: 1,
-        general: { guard: true, localLogs: true, compact: false },
+        general: { defaultPermissionMode: 'guard', localLogs: true, compact: false },
+        browserPermissions: { upload: 'ask', download: 'ask' },
         mcpEnabled: { browser: true, xgen: true, filesystem: false },
         skillEnabled: {},
       }),
       save: async (settings) => settings,
+    },
+    credentials: {
+      status: async () => ({ available: false, reason: 'Secure storage is unavailable in preview mode.' }),
+      list: async () => [],
+      save: async () => { throw new Error('Secure storage is unavailable in preview mode.'); },
+      remove: async () => false,
+      autofill: async () => ({ state: 'unavailable' }),
     },
     command: {
       run: async () => ({ state: 'denied', decision: 'deny', reason: '브라우저 미리보기에서는 명령을 실행하지 않습니다.' }),

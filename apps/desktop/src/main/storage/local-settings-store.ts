@@ -5,7 +5,8 @@ import type { AppSettings } from '../../shared/contracts';
 
 const defaults: AppSettings = {
   schemaVersion: 1,
-  general: { guard: true, localLogs: true, compact: false },
+  general: { defaultPermissionMode: 'guard', localLogs: true, compact: false },
+  browserPermissions: { upload: 'ask', download: 'ask' },
   mcpEnabled: { browser: true, xgen: true, filesystem: false },
   skillEnabled: {},
 };
@@ -42,13 +43,32 @@ function sanitizeSettings(value: unknown): AppSettings {
   return {
     schemaVersion: 1,
     general: {
-      guard: booleanValue(general.guard, defaults.general.guard),
+      defaultPermissionMode: permissionModeValue(general.defaultPermissionMode, general.guard),
       localLogs: booleanValue(general.localLogs, defaults.general.localLogs),
       compact: booleanValue(general.compact, defaults.general.compact),
     },
+    browserPermissions: permissionSettings(input.browserPermissions),
     mcpEnabled: booleanRecord(input.mcpEnabled, defaults.mcpEnabled),
     skillEnabled: booleanRecord(input.skillEnabled, defaults.skillEnabled),
   };
+}
+
+function permissionSettings(value: unknown): AppSettings['browserPermissions'] {
+  const input = isRecord(value) ? value : {};
+  return {
+    upload: permissionValue(input.upload, defaults.browserPermissions.upload),
+    download: permissionValue(input.download, defaults.browserPermissions.download),
+  };
+}
+
+function permissionValue(value: unknown, fallback: AppSettings['browserPermissions']['upload']): AppSettings['browserPermissions']['upload'] {
+  return value === 'allow' || value === 'ask' || value === 'deny' ? value : fallback;
+}
+
+function permissionModeValue(value: unknown, legacyGuard: unknown): AppSettings['general']['defaultPermissionMode'] {
+  if (value === 'read-only' || value === 'guard' || value === 'full-access') return value;
+  if (typeof legacyGuard === 'boolean') return legacyGuard ? 'guard' : 'full-access';
+  return defaults.general.defaultPermissionMode;
 }
 
 function booleanRecord(value: unknown, fallback: Record<string, boolean>): Record<string, boolean> {

@@ -235,6 +235,7 @@ pub fn format_tab_id(tab_id: u32) -> String {
 pub enum TabRef {
     Id(u32),
     Label(String),
+    TargetId(String),
 }
 
 impl TabRef {
@@ -263,6 +264,9 @@ impl TabRef {
                 return Ok(TabRef::Id(id));
             }
         }
+        if is_cdp_target_id(input) {
+            return Ok(TabRef::TargetId(input.to_string()));
+        }
         if input.chars().all(|c| c.is_ascii_digit()) {
             return Err(format!(
                 "Expected a tab id like `t{}` or a label; positional integers are not accepted \
@@ -279,6 +283,10 @@ impl TabRef {
         }
         Ok(TabRef::Label(input.to_string()))
     }
+}
+
+fn is_cdp_target_id(input: &str) -> bool {
+    input.len() == 32 && input.chars().all(|character| character.is_ascii_hexdigit())
 }
 
 /// Labels must look like identifiers: start with a letter, contain only
@@ -1273,6 +1281,17 @@ impl BrowserManager {
                         name
                     )
                 }),
+            TabRef::TargetId(target_id) => self
+                .pages
+                .iter()
+                .find(|page| page.target_id == *target_id)
+                .map(|page| page.tab_id)
+                .ok_or_else(|| {
+                    format!(
+                        "No tab with target id `{}`; run `agent-browser tab` to list open tabs",
+                        target_id
+                    )
+                }),
         }
     }
 
@@ -2093,6 +2112,19 @@ mod tests {
             TabRef::parse("my_tab"),
             Ok(TabRef::Label("my_tab".to_string()))
         );
+    }
+
+    #[test]
+    fn test_parse_tab_ref_cdp_target_id() {
+        for target_id in [
+            "BF797F5DF0085AED41FEEEE3EE466D4A",
+            "9ECB05A2EAFA8C795F29EFB0DDD6C2B8",
+        ] {
+            assert_eq!(
+                TabRef::parse(target_id),
+                Ok(TabRef::TargetId(target_id.to_string()))
+            );
+        }
     }
 
     #[test]

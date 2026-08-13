@@ -4,6 +4,7 @@ import type {
   BrowserLayoutState,
   CommandRequest,
   CommandResult,
+  CredentialSaveRequest,
   AgentRunEvent,
   AgentRunHandle,
   AgentRunRequest,
@@ -35,6 +36,7 @@ function startAgentRun(
     id,
     result,
     cancel: () => ipcRenderer.invoke('agent:cancel', id),
+    respondToApproval: (approvalId, decision) => ipcRenderer.invoke('agent:approval-response', id, approvalId, decision),
   };
 }
 
@@ -81,6 +83,13 @@ const api: XgenSideApi = {
   settings: {
     load: (): Promise<AppSettings> => ipcRenderer.invoke('settings:load'),
     save: (settings: AppSettings): Promise<AppSettings> => ipcRenderer.invoke('settings:save', settings),
+  },
+  credentials: {
+    status: () => ipcRenderer.invoke('credentials:status'),
+    list: () => ipcRenderer.invoke('credentials:list'),
+    save: (request: CredentialSaveRequest) => ipcRenderer.invoke('credentials:save', request),
+    remove: (id: string) => ipcRenderer.invoke('credentials:remove', id),
+    autofill: (credentialId: string, tabId: string) => ipcRenderer.invoke('credentials:autofill', credentialId, tabId),
   },
   command: {
     run: (request: CommandRequest): Promise<CommandResult> => ipcRenderer.invoke('command:run', request),

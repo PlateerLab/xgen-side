@@ -1,6 +1,7 @@
-import { BrowserWindow, WebContentsView } from 'electron';
+import { BrowserWindow, WebContentsView, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
-import type { BrowserHistoryEntry, BrowserLayoutState, BrowserSnapshot, BrowserTabState, PageContext } from '../shared/contracts';
+import { normalizeBrowserAddress } from './browser-address';
+import type { BrowserAgentStatus, BrowserHistoryEntry, BrowserLayoutState, BrowserSnapshot, BrowserTabOwner, BrowserTabState, PageContext } from '../shared/contracts';
 
 interface BrowserTab {
   id: string;
@@ -8,6 +9,20 @@ interface BrowserTab {
   title: string;
   url: string;
   loading: boolean;
+  owner: BrowserTabOwner;
+  agentRunId?: string;
+  agentStatus?: BrowserAgentStatus;
+  credentialProtected: boolean;
+}
+
+export interface BrowserCredentialAutofillTarget {
+  contents: WebContents;
+  protect(): void;
+}
+
+export interface AgentBrowserTarget {
+  tab: BrowserTabState;
+  targetId?: string;
 }
 
 export class BrowserWorkspace {
@@ -30,6 +45,38 @@ export class BrowserWorkspace {
   }
 
   async createTab(url = 'https://www.google.com/'): Promise<BrowserTabState[]> {
+    await this.createManagedTab(url, 'user');
+    return this.snapshot();
+  }
+
+  async createAgentTab(agentRunId: string, url = 'about:blank'): Promise<AgentBrowserTarget> {
+    if ([...this.tabs.values()].some((tab) => tab.credentialProtected)) {
+      throw new Error('Close the credential-protected tab before starting browser automation.');
+    }
+    const existing = [...this.tabs.values()].find((tab) => tab.agentRunId === agentRunId);
+    const tab = existing ?? await this.createManagedTab(url, 'agent', agentRunId);
+    tab.agentStatus = 'running';
+    this.emit();
+    return { tab: this.tabState(tab), targetId: await this.automationTargetId(tab.id) };
+  }
+
+  async attachActiveTabToAgentRun(agentRunId: string): Promise<AgentBrowserTarget | undefined> {
+    const tab = this.activeTab();
+    if (!tab || [...this.tabs.values()].some((candidate) => candidate.credentialProtected)) return undefined;
+    tab.agentRunId = agentRunId;
+    tab.agentStatus = 'running';
+    this.emit();
+    return { tab: this.tabState(tab), targetId: await this.automationTargetId(tab.id) };
+  }
+
+  updateAgentRunStatus(agentRunId: string, status: BrowserAgentStatus): BrowserTabState[] {
+    for (const tab of this.tabs.values()) {
+      if (tab.agentRunId === agentRunId) tab.agentStatus = status;
+    }
+    return this.emit();
+  }
+
+  private async createManagedTab(url: string, owner: BrowserTabOwner, agentRunId?: string): Promise<BrowserTab> {
     const id = randomUUID();
     const view = new WebContentsView({
       webPreferences: {
@@ -43,16 +90,20 @@ export class BrowserWorkspace {
     const tab: BrowserTab = {
       id,
       view,
-      title: 'New tab',
+      title: owner === 'agent' ? 'Agent browser' : 'New tab',
       url: 'about:blank',
       loading: false,
+      owner,
+      agentRunId,
+      agentStatus: agentRunId ? 'running' : undefined,
+      credentialProtected: false,
     };
 
     this.tabs.set(id, tab);
     this.attachTabEvents(tab);
     this.activateTab(id);
-    await view.webContents.loadURL(normalizeAddressInput(url));
-    return this.snapshot();
+    await view.webContents.loadURL(normalizeBrowserAddress(url));
+    return tab;
   }
 
   activateTab(id: string): BrowserTabState[] {
@@ -92,18 +143,58 @@ export class BrowserWorkspace {
     return this.snapshot();
   }
 
-  historySince(sinceMs: number): BrowserHistoryEntry[] {
-    return this.history.filter((entry) => entry.visitedAtMs >= sinceMs).map((entry) => ({ ...entry }));
+  historySince(sinceMs: number, tabId?: string): BrowserHistoryEntry[] {
+    return this.history
+      .filter((entry) => entry.visitedAtMs >= sinceMs && (!tabId || entry.tabId === tabId))
+      .map((entry) => ({ ...entry }));
   }
 
   activeUrl(): string | undefined {
     return this.activeTab()?.url;
   }
 
+  urlForTab(id: string): string | undefined {
+    return this.tabs.get(id)?.url;
+  }
+
+  credentialAutofillTarget(id: string): BrowserCredentialAutofillTarget | undefined {
+    const tab = this.tabs.get(id);
+    const hasRunningAgent = [...this.tabs.values()].some((candidate) => candidate.agentStatus === 'running');
+    if (!tab || tab.id !== this.activeTabId || tab.id !== this.attachedTabId || tab.owner !== 'user' || tab.agentRunId || hasRunningAgent) {
+      return undefined;
+    }
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed()) return undefined;
+    return {
+      contents,
+      protect: () => {
+        if (this.tabs.get(id) === tab) tab.credentialProtected = true;
+      },
+    };
+  }
+
+  async automationTargetId(id: string): Promise<string | undefined> {
+    const tab = this.tabs.get(id);
+    if ([...this.tabs.values()].some((candidate) => candidate.credentialProtected)) return undefined;
+    const contents = tab?.view.webContents;
+    if (!contents || contents.isDestroyed()) return undefined;
+    const attachedHere = !contents.debugger.isAttached();
+    try {
+      if (attachedHere) contents.debugger.attach('1.3');
+      const response = await contents.debugger.sendCommand('Target.getTargetInfo') as unknown;
+      if (!isRecord(response) || !isRecord(response.targetInfo)) return undefined;
+      return typeof response.targetInfo.targetId === 'string' ? response.targetInfo.targetId : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      if (attachedHere && contents.debugger.isAttached()) contents.debugger.detach();
+    }
+  }
+
   async navigate(input: string): Promise<BrowserTabState[]> {
     const tab = this.activeTab();
     if (!tab) return this.snapshot();
-    await tab.view.webContents.loadURL(normalizeAddressInput(input));
+    await tab.view.webContents.loadURL(normalizeBrowserAddress(input));
     return this.snapshot();
   }
 
@@ -126,7 +217,7 @@ export class BrowserWorkspace {
 
   async getPageContext(): Promise<PageContext | undefined> {
     const tab = this.activeTab();
-    if (!tab || tab.view.webContents.isDestroyed()) return undefined;
+    if (!tab || tab.credentialProtected || tab.view.webContents.isDestroyed()) return undefined;
     const extracted = await tab.view.webContents.executeJavaScript(`(() => {
       const selection = window.getSelection()?.toString() || '';
       const root = document.querySelector('main, article, [role="main"]') || document.body;
@@ -151,7 +242,7 @@ export class BrowserWorkspace {
     this.layoutState = {
       visible: Boolean(layout.visible),
       leftWidth: clampLayoutValue(layout.leftWidth, 0, 420),
-      rightWidth: clampLayoutValue(layout.rightWidth, 0, 480),
+      rightWidth: clampLayoutValue(layout.rightWidth, 0, 560),
       chromeHeight: clampLayoutValue(layout.chromeHeight, 56, 110),
       placement: layout.placement === 'right-dock' ? 'right-dock' : 'workspace',
       dockInset: clampLayoutValue(layout.dockInset ?? 10, 0, 32),
@@ -168,7 +259,7 @@ export class BrowserWorkspace {
     const { webContents } = tab.view;
 
     webContents.setWindowOpenHandler(({ url }) => {
-      void this.createTab(url);
+      void this.createManagedTab(url, tab.owner, tab.agentRunId);
       return { action: 'deny' };
     });
     webContents.on('will-navigate', (event, url) => {
@@ -259,7 +350,11 @@ export class BrowserWorkspace {
   }
 
   private snapshot(): BrowserTabState[] {
-    return [...this.tabs.values()].map((tab) => ({
+    return [...this.tabs.values()].map((tab) => this.tabState(tab));
+  }
+
+  private tabState(tab: BrowserTab): BrowserTabState {
+    return {
       id: tab.id,
       title: tab.title,
       url: tab.url,
@@ -267,7 +362,10 @@ export class BrowserWorkspace {
       loading: tab.loading,
       canGoBack: tab.view.webContents.navigationHistory.canGoBack(),
       canGoForward: tab.view.webContents.navigationHistory.canGoForward(),
-    }));
+      owner: tab.owner,
+      agentRunId: tab.agentRunId,
+      agentStatus: tab.agentStatus,
+    };
   }
 
   private emit(): BrowserTabState[] {
@@ -276,9 +374,9 @@ export class BrowserWorkspace {
     return tabs;
   }
 
-  async captureSnapshot(reason: string): Promise<BrowserSnapshot | undefined> {
-    const tab = this.activeTab();
-    if (!tab || tab.view.webContents.isDestroyed() || tab.url === 'about:blank') return undefined;
+  async captureSnapshot(reason: string, tabId?: string): Promise<BrowserSnapshot | undefined> {
+    const tab = tabId ? this.tabs.get(tabId) : this.activeTab();
+    if (!tab || tab.credentialProtected || tab.view.webContents.isDestroyed() || tab.url === 'about:blank') return undefined;
     const temporarilyAttached = this.attachedTabId !== tab.id;
     if (temporarilyAttached) {
       const size = this.window.getContentSize();
@@ -335,20 +433,6 @@ function clampLayoutValue(value: number, minimum: number, maximum: number): numb
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
 
-function normalizeAddressInput(input: string): string {
-  const value = input.trim();
-  if (!value) return 'about:blank';
-
-  try {
-    const parsed = new URL(value.includes('://') ? value : `https://${value}`);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString();
-  } catch {
-    // Fall through to search.
-  }
-
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
-}
-
 function isAllowedBrowserUrl(url: string): boolean {
   try {
     const protocol = new URL(url).protocol;
@@ -356,6 +440,10 @@ function isAllowedBrowserUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function delay(durationMs: number): Promise<void> {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
 import { ClaudeCodeAdapter } from './claude-code-adapter';
-import { CodexAdapter, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
+import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
 import type { LocalRunStore } from '../storage/local-run-store';
 
 const unusedStore = {} as LocalRunStore;
@@ -26,6 +26,30 @@ test('Codex adapter normalizes live text and MCP activity events', () => {
     type: 'item.completed',
     item: { type: 'agent_message', text: 'live answer' },
   })), [{ type: 'text', text: 'live answer', mode: 'replace' }]);
+});
+
+test('Codex adapter recognizes terminal exec stream events', () => {
+  const adapter = new CodexAdapter(unusedStore);
+  assert.equal(adapter.isStreamComplete(JSON.stringify({ type: 'turn.completed' })), true);
+  assert.equal(adapter.isStreamComplete(JSON.stringify({ type: 'turn.failed' })), false);
+  assert.equal(adapter.isStreamComplete(JSON.stringify({ type: 'item.completed' })), false);
+  assert.equal(adapter.isStreamComplete('not json'), false);
+});
+
+test('Codex adapter pre-approves the capability-bounded XGEN browser MCP server', () => {
+  const overrides = codexBrowserMcpOverrides({
+    executablePath: 'C:\\XGEN Side\\agent-browser.exe',
+    environment: { AGENT_BROWSER_ACTION_POLICY: 'C:\\runs\\browser-policy.json' },
+    toolProfiles: ['core', 'files'],
+    tabId: 'tab-1',
+  });
+
+  assert.deepEqual(overrides, [
+    '-c', 'mcp_servers.xgen_browser.command="C:/XGEN Side/agent-browser.exe"',
+    '-c', 'mcp_servers.xgen_browser.args=["mcp","--tools","core,files"]',
+    '-c', 'mcp_servers.xgen_browser.env={AGENT_BROWSER_ACTION_POLICY="C:/runs/browser-policy.json"}',
+    '-c', 'mcp_servers.xgen_browser.default_tools_approval_mode="approve"',
+  ]);
 });
 
 test('Codex adapter locates current and legacy npm native executables', () => {

@@ -60,6 +60,19 @@ test('auto recognizes the Korean connective form for browser navigation', async 
   assert.equal(route.agentBrowserRequired, true);
 });
 
+test('auto uses the visible browser for cross-retailer price and benefit comparisons', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '홈쇼핑에서 잘 팔리는 상품 10개를 찾아서 현대홈쇼핑과 GS 홈쇼핑에도 팔고있는지 비교해줘. 가격과 혜택 차이도 비교해줘',
+    pageContext: pageContext('https://www.lotteimall.com/main/viewMain.lotte'),
+  });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.equal(route.browserVisible, true);
+  assert.equal(route.agentBrowserRequired, true);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.browser-navigation', 'xgen.structured-extraction']);
+});
+
 test('auto uses the attached page for ordinary page questions', async () => {
   const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '핵심 내용을 요약해줘', pageContext: pageContext('https://example.com') });
   assert.equal(route.resolvedMode, 'page');
@@ -155,10 +168,54 @@ test('injects selected Skill workflows and reference contracts into provider con
   assert.match(instructions, /<skill_resource path="references\/output-contract\.md">/);
 });
 
+test('explicit Skill selection determines the execution boundary in Auto mode', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '가격을 정리해줘',
+    selectedSkillIds: ['xgen.structured-extraction'],
+  });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.browser-navigation', 'xgen.structured-extraction']);
+  assert.equal(route.agentBrowserRequired, true);
+});
+
+test('explicit conversation Skill keeps a current-looking request offline', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '최신 정보처럼 보이는 문장을 다듬어줘',
+    selectedSkillIds: ['xgen.conversation'],
+  });
+  assert.equal(route.resolvedMode, 'chat');
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.conversation']);
+});
+
+test('blocks an explicitly selected Skill that is disabled', async () => {
+  const route = await router({ 'global:structured-extraction': false }).route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '가격을 정리해줘',
+    selectedSkillIds: ['xgen.structured-extraction'],
+  });
+  assert.match(route.blockedReason ?? '', /disabled/);
+});
+
+test('blocks an unknown explicitly selected Skill', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '작업해줘',
+    selectedSkillIds: ['custom.unknown'],
+  });
+  assert.match(route.blockedReason ?? '', /Unknown selected Skill/);
+});
+
 function router(skillEnabled: Record<string, boolean> = {}): SkillRouter {
   const settings: AppSettings = {
     schemaVersion: 1,
-    general: { guard: true, localLogs: true, compact: false },
+    general: { defaultPermissionMode: 'guard', localLogs: true, compact: false },
+    browserPermissions: { upload: 'ask', download: 'ask' },
     mcpEnabled: { browser: true },
     skillEnabled,
   };

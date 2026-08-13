@@ -1,19 +1,26 @@
-import { app, BrowserWindow, ipcMain, session, type Session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, type IpcMainInvokeEvent, type Session } from 'electron';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { BrowserWorkspace } from './browser-workspace';
 import { CommandBroker } from './command/command-broker';
+import { BrowserApprovalBroker } from './security/browser-approval-broker';
+import { CredentialAutofillService } from './security/credential-autofill';
 import { AgentBrowserClient } from './engine/agent-browser-client';
+import { selectBrowserCdpEndpoint } from './browser-cdp';
 import { ProviderManager } from './provider/provider-manager';
+import { CredentialVault } from './storage/credential-vault';
 import { LocalRunStore } from './storage/local-run-store';
 import { LocalSettingsStore } from './storage/local-settings-store';
-import type { AgentRunEvent, AgentRunRequest, AppSettings, BrowserLayoutState, CommandRequest, ProviderId } from '../shared/contracts';
+import type { AgentRunEvent, AgentRunRequest, AppSettings, BrowserLayoutState, CommandRequest, CredentialSaveRequest, ProviderId } from '../shared/contracts';
 
 let mainWindow: BrowserWindow | undefined;
 let workspace: BrowserWorkspace | undefined;
 const engineClient = new AgentBrowserClient();
 const runStore = new LocalRunStore();
 const settingsStore = new LocalSettingsStore();
+const credentialVault = new CredentialVault();
+const credentialAutofill = new CredentialAutofillService(credentialVault, (tabId) => workspace?.credentialAutofillTarget(tabId));
+const approvalBroker = new BrowserApprovalBroker();
 const commandBroker = new CommandBroker((request, result) => runStore.recordCommand(request, result));
 let providerManager: ProviderManager | undefined;
 const activeRuns = new Map<string, { controller: AbortController; webContentsId: number }>();
@@ -35,29 +42,40 @@ async function bootstrap(): Promise<void> {
   app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort));
   await app.whenReady();
   await runStore.initialize();
+  await approvalBroker.start();
   providerManager = new ProviderManager(
     runStore,
     engineClient,
     settingsStore,
     cdpPort,
-    (sinceMs) => workspace?.historySince(sinceMs) ?? [],
-    (reason) => workspace?.captureSnapshot(reason) ?? Promise.resolve(undefined),
-    () => resolveActiveBrowserCdp(cdpPort),
+    (sinceMs, tabId) => workspace?.historySince(sinceMs, tabId) ?? [],
+    (reason, tabId) => workspace?.captureSnapshot(reason, tabId) ?? Promise.resolve(undefined),
+    (tabId) => resolveBrowserCdp(cdpPort, tabId),
+    async (runId, request, route) => {
+      if (!workspace) throw new Error('브라우저 작업 공간이 준비되지 않았습니다.');
+      const useCurrentTab = request.browserTarget === 'current-tab' || request.sourceSurface === 'browser-side';
+      if (useCurrentTab && request.pageContext?.tabId) {
+        workspace.activateTab(request.pageContext.tabId);
+        const target = await workspace.attachActiveTabToAgentRun(runId);
+        if (target) return target;
+      }
+      return workspace.createAgentTab(runId, route.targetUrl ?? 'about:blank');
+    },
+    (runId, status) => workspace?.updateAgentRunStatus(runId, status),
+    approvalBroker,
   );
   configureSessionSecurity();
   registerIpc();
   await createWindow();
 }
 
-async function resolveActiveBrowserCdp(cdpPort: number): Promise<string | undefined> {
-  const activeUrl = workspace?.activeUrl();
-  if (!activeUrl) return undefined;
+async function resolveBrowserCdp(cdpPort: number, tabId?: string): Promise<string | undefined> {
+  const targetUrl = tabId ? workspace?.urlForTab(tabId) : workspace?.activeUrl();
+  if (!targetUrl) return undefined;
   try {
     const response = await fetch(`http://127.0.0.1:${cdpPort}/json`);
-    const targets = await response.json() as Array<{ type?: string; url?: string; webSocketDebuggerUrl?: string }>;
-    const exact = targets.find((target) => target.type === 'page' && target.url === activeUrl);
-    const fallback = targets.find((target) => target.type === 'page' && target.url && !target.url.startsWith('http://localhost:'));
-    return exact?.webSocketDebuggerUrl || fallback?.webSocketDebuggerUrl;
+    const targets = await response.json() as Array<{ type?: string; url?: string }>;
+    return selectBrowserCdpEndpoint(cdpPort, targetUrl, targets);
   } catch {
     return undefined;
   }
@@ -129,6 +147,37 @@ function configurePermissions(targetSession: Session): void {
     callback(false);
   });
   targetSession.setPermissionCheckHandler(() => false);
+  targetSession.on('will-download', (_event, item, webContents) => {
+    item.pause();
+    void settingsStore.load().then(async (settings) => {
+      const policy = settings.browserPermissions.download;
+      if (policy === 'deny') {
+        item.cancel();
+        return;
+      }
+      if (policy === 'ask') {
+        const parent = BrowserWindow.fromWebContents(webContents) ?? mainWindow;
+        const options = {
+          type: 'question' as const,
+          buttons: ['취소', '다운로드 허용'],
+          defaultId: 0,
+          cancelId: 0,
+          title: '다운로드 권한',
+          message: `“${item.getFilename()}” 파일을 다운로드할까요?`,
+          detail: item.getURL(),
+          noLink: true,
+        };
+        const result = parent
+          ? await dialog.showMessageBox(parent, options)
+          : await dialog.showMessageBox(options);
+        if (result.response !== 1) {
+          item.cancel();
+          return;
+        }
+      }
+      if (item.getState() === 'progressing') item.resume();
+    }).catch(() => item.cancel());
+  });
 }
 
 function registerIpc(): void {
@@ -136,7 +185,11 @@ function registerIpc(): void {
   ipcMain.handle('browser:list-tabs', () => workspace?.listTabs() ?? []);
   ipcMain.handle('browser:new-tab', (_event, url?: string) => workspace?.createTab(url));
   ipcMain.handle('browser:activate-tab', (_event, id: string) => workspace?.activateTab(id));
-  ipcMain.handle('browser:close-tab', (_event, id: string) => workspace?.closeTab(id));
+  ipcMain.handle('browser:close-tab', (_event, id: string) => {
+    const tab = workspace?.listTabs().find((candidate) => candidate.id === id);
+    if (tab?.agentRunId && tab.agentStatus === 'running') activeRuns.get(tab.agentRunId)?.controller.abort();
+    return workspace?.closeTab(id);
+  });
   ipcMain.handle('browser:navigate', (_event, input: string) => workspace?.navigate(input));
   ipcMain.handle('browser:back', () => workspace?.back());
   ipcMain.handle('browser:forward', () => workspace?.forward());
@@ -157,15 +210,25 @@ function registerIpc(): void {
     event.sender.once('destroyed', onDestroyed);
     try {
       return await providerManager.run(request, {
+        runId: requestId,
         signal: controller.signal,
         onEvent: (runEvent: AgentRunEvent) => {
           if (!event.sender.isDestroyed()) event.sender.send('agent:run-event', { requestId, event: runEvent });
         },
       });
+    } catch (error) {
+      workspace?.updateAgentRunStatus(requestId, controller.signal.aborted ? 'cancelled' : 'failed');
+      throw error;
     } finally {
+      approvalBroker.unregisterRun(requestId);
       activeRuns.delete(requestId);
       if (!event.sender.isDestroyed()) event.sender.removeListener('destroyed', onDestroyed);
     }
+  });
+  ipcMain.handle('agent:approval-response', (event, requestId: string, approvalId: string, decision: 'allow' | 'deny') => {
+    const active = activeRuns.get(requestId);
+    if (!active || active.webContentsId !== event.sender.id || (decision !== 'allow' && decision !== 'deny')) return false;
+    return approvalBroker.respond(requestId, approvalId, decision);
   });
   ipcMain.handle('agent:cancel', (event, requestId: string) => {
     const active = activeRuns.get(requestId);
@@ -182,8 +245,34 @@ function registerIpc(): void {
   ipcMain.handle('local-data:write-markdown', (_event, relativePath: string, content: string) => runStore.writeMarkdown(relativePath, content));
   ipcMain.handle('settings:load', () => settingsStore.load());
   ipcMain.handle('settings:save', (_event, settings: AppSettings) => settingsStore.save(settings));
+  ipcMain.handle('credentials:status', (event) => {
+    assertShellIpcSender(event);
+    return credentialVault.status();
+  });
+  ipcMain.handle('credentials:list', (event) => {
+    assertShellIpcSender(event);
+    return credentialVault.list();
+  });
+  ipcMain.handle('credentials:save', (event, request: CredentialSaveRequest) => {
+    assertShellIpcSender(event);
+    return credentialVault.save(request);
+  });
+  ipcMain.handle('credentials:remove', (event, id: string) => {
+    assertShellIpcSender(event);
+    return credentialVault.remove(id);
+  });
+  ipcMain.handle('credentials:autofill', (event, credentialId: string, tabId: string) => {
+    assertShellIpcSender(event);
+    return credentialAutofill.fill(credentialId, tabId);
+  });
   ipcMain.handle('command:run', (_event, request: CommandRequest) => commandBroker.request(sanitizeCommandRequest(request)));
   ipcMain.handle('command:approve', (_event, token: string) => commandBroker.approve(token));
+}
+
+function assertShellIpcSender(event: IpcMainInvokeEvent): void {
+  if (!mainWindow || event.sender.id !== mainWindow.webContents.id) {
+    throw new Error('Credential operations are only available to the desktop shell.');
+  }
 }
 
 function reserveLoopbackPort(): Promise<number> {

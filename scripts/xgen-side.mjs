@@ -15,11 +15,17 @@ const commands = {
   test: [
     'node_modules/tsx/dist/cli.mjs',
     '--test',
+    'src/main/browser-cdp.test.ts',
+    'src/main/browser-address.test.ts',
     'src/main/security/policy-engine.test.ts',
+    'src/main/security/browser-approval-broker.test.ts',
+    'src/main/security/credential-policy.test.ts',
     'src/main/command/command-broker.test.ts',
     'src/main/provider/provider-adapter.test.ts',
+    'src/main/provider/browser-action-policy.test.ts',
     'src/main/provider/provider-runtime.test.ts',
     'src/main/skills/skill-router.test.ts',
+    'src/renderer/src/agent-run-link.test.ts',
   ],
 };
 

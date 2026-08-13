@@ -35,3 +35,20 @@ test('collect stops an active process when its signal is aborted', async () => {
   assert.equal(result.cancelled, true);
   assert.notEqual(result.exitCode, 0);
 });
+
+test('collect completes after a terminal stdout line even when the process stays alive', async () => {
+  const startedAt = Date.now();
+  const result = await collect(
+    process.execPath,
+    ['-e', "console.log('streaming'); console.log('turn.completed'); setTimeout(() => {}, 5000)"],
+    process.cwd(),
+    undefined,
+    10_000,
+    safeEnvironment(),
+    { stopAfterStdoutLine: (line) => line === 'turn.completed' },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.cancelled, false);
+  assert.match(result.stdout, /turn\.completed/);
+  assert.ok(Date.now() - startedAt < 3_000);
+});

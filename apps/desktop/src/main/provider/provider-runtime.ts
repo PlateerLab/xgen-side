@@ -14,6 +14,7 @@ export interface CollectOptions {
   signal?: AbortSignal;
   onStdoutLine?(line: string): void;
   onStderrLine?(line: string): void;
+  stopAfterStdoutLine?(line: string): boolean;
 }
 
 export async function locateNativeExecutable(
@@ -105,6 +106,7 @@ export function collect(
     let bytes = 0;
     let timedOut = false;
     let cancelled = false;
+    let outputCompleted = false;
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
     let forceFinishTimer: NodeJS.Timeout | undefined;
@@ -123,7 +125,14 @@ export function collect(
       if (target === 'stdout') stdoutLines = remainder;
       else stderrLines = remainder;
       const listener = target === 'stdout' ? options.onStdoutLine : options.onStderrLine;
-      for (const line of lines) listener?.(line);
+      for (const line of lines) {
+        listener?.(line);
+        if (target === 'stdout' && !outputCompleted && options.stopAfterStdoutLine?.(line)) {
+          outputCompleted = true;
+          terminateProcessTree(child.pid);
+          forceFinishTimer = setTimeout(() => finish({ exitCode: 0, stdout, stderr, cancelled: false }), 1_500);
+        }
+      }
     };
     const append = (target: 'stdout' | 'stderr', chunk: Buffer): void => {
       const remaining = Math.max(0, maxOutputBytes - bytes);
@@ -152,7 +161,7 @@ export function collect(
       if (stderrLines) options.onStderrLine?.(stderrLines);
       if (timedOut) stderr += `\nProcess timed out after ${timeoutMs}ms.`;
       if (bytes >= maxOutputBytes) stderr += '\nOutput was truncated.';
-      finish({ exitCode: code ?? 1, stdout, stderr, cancelled });
+      finish({ exitCode: outputCompleted ? 0 : code ?? 1, stdout, stderr, cancelled });
     });
     if (stdin !== undefined) child.stdin.end(stdin, 'utf8');
     else child.stdin.end();

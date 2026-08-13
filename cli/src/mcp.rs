@@ -11,7 +11,10 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
+use std::net::TcpStream;
+#[cfg(not(windows))]
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -217,6 +220,7 @@ enum ToolProfile {
     Network,
     State,
     Debug,
+    Files,
     Tabs,
     React,
     Mobile,
@@ -230,6 +234,7 @@ impl ToolProfile {
             "network" => Some(Self::Network),
             "state" | "storage" | "auth" => Some(Self::State),
             "debug" | "diagnostics" => Some(Self::Debug),
+            "files" | "transfers" => Some(Self::Files),
             "tabs" | "frames" => Some(Self::Tabs),
             "react" | "web" => Some(Self::React),
             "mobile" | "ios" => Some(Self::Mobile),
@@ -244,6 +249,7 @@ impl ToolProfile {
             Self::Network => "network",
             Self::State => "state",
             Self::Debug => "debug",
+            Self::Files => "files",
             Self::Tabs => "tabs",
             Self::React => "react",
             Self::Mobile => "mobile",
@@ -257,6 +263,7 @@ impl ToolProfile {
             Self::Network => "Network interception, request inspection, HAR capture, headers, credentials, and offline mode.",
             Self::State => "Cookies, storage, auth profiles, saved browser state, sessions, Chrome profiles, and bundled skills.",
             Self::Debug => "Console/errors, highlighting, DevTools, tracing, profiling, accessibility audits, PDF, downloads/uploads, recording, clipboard, plugin registry and plugin command.run, doctor, dashboard, install, upgrade, and chat.",
+            Self::Files => "Narrow file transfer tools for uploads and downloads.",
             Self::Tabs => "Tab, window, frame, and JavaScript dialog management.",
             Self::React => "React tree inspection, render recording, Suspense inspection, Web Vitals, SPA pushstate, and init-script removal.",
             Self::Mobile => "Viewport/device/geolocation/media emulation plus touch, swipe, and lower-level mouse tools.",
@@ -270,6 +277,7 @@ impl ToolProfile {
             Self::Network => NETWORK_PROFILE_TOOLS,
             Self::State => STATE_PROFILE_TOOLS,
             Self::Debug => DEBUG_PROFILE_TOOLS,
+            Self::Files => FILES_PROFILE_TOOLS,
             Self::Tabs => TABS_PROFILE_TOOLS,
             Self::React => REACT_PROFILE_TOOLS,
             Self::Mobile => MOBILE_PROFILE_TOOLS,
@@ -308,6 +316,9 @@ impl McpConfig {
     }
 
     fn allows(&self, name: &str) -> bool {
+        if env::var_os("XGEN_APPROVAL_BROKER").is_some() && matches!(name, TOOL_CONFIRM | TOOL_DENY) {
+            return false;
+        }
         match &self.enabled_tools {
             Some(enabled_tools) => enabled_tools.contains(name),
             None => true,
@@ -398,6 +409,8 @@ const STATE_PROFILE_TOOLS: &[&str] = &[
     TOOL_SKILLS_GET,
     TOOL_SKILLS_PATH,
 ];
+
+const FILES_PROFILE_TOOLS: &[&str] = &[TOOL_WAIT_FOR_DOWNLOAD, TOOL_UPLOAD, TOOL_DOWNLOAD];
 
 const DEBUG_PROFILE_TOOLS: &[&str] = &[
     TOOL_WAIT_FOR_DOWNLOAD,
@@ -2303,7 +2316,76 @@ fn call_cli_tool(
     let run = run_cli(&cli_args, stdin_body, timeout_ms).map_err(|e| {
         ProtocolError::invalid_params(format!("Failed to run agent-browser: {}", e))
     })?;
+    let run = resolve_broker_confirmation(run, arguments, session.as_deref(), timeout_ms)?;
     Ok(tool_result_from_run(run))
+}
+
+
+fn resolve_broker_confirmation(
+    mut run: CliRun,
+    arguments: &Value,
+    session: Option<&str>,
+    timeout_ms: u64,
+) -> Result<CliRun, ProtocolError> {
+    loop {
+        let response = match serde_json::from_str::<Value>(run.stdout.trim()) {
+            Ok(response) => response,
+            Err(_) => return Ok(run),
+        };
+        let data = match confirmation_data(&response) {
+            Some(data) => data,
+            None => return Ok(run),
+        };
+        let confirmation_id = data.get("confirmation_id").and_then(Value::as_str).unwrap_or("");
+        let action = data.get("action").and_then(Value::as_str).unwrap_or("unknown");
+        if confirmation_id.is_empty() {
+            return Err(ProtocolError::invalid_params("Browser confirmation did not include an id"));
+        }
+        let decision = request_external_approval(confirmation_id, action, arguments);
+        let mut confirm_args = vec!["--json".to_string()];
+        append_session_args(&mut confirm_args, session);
+        confirm_args.push(if decision { "confirm" } else { "deny" }.to_string());
+        confirm_args.push(confirmation_id.to_string());
+        run = run_cli(&confirm_args, None, timeout_ms).map_err(|e| {
+            ProtocolError::invalid_params(format!("Failed to resolve browser confirmation: {}", e))
+        })?;
+        if !decision {
+            return Ok(run);
+        }
+    }
+}
+
+fn confirmation_data(value: &Value) -> Option<&Value> {
+    let data = value.get("data")?;
+    if data.get("confirmation_required").and_then(Value::as_bool) == Some(true) {
+        return Some(data);
+    }
+    data.get("result").and_then(confirmation_data)
+}
+
+fn request_external_approval(confirmation_id: &str, action: &str, arguments: &Value) -> bool {
+    let address = match env::var("XGEN_APPROVAL_BROKER") { Ok(value) => value, Err(_) => return false };
+    let token = match env::var("XGEN_APPROVAL_TOKEN") { Ok(value) => value, Err(_) => return false };
+    let run_id = match env::var("XGEN_APPROVAL_RUN_ID") { Ok(value) => value, Err(_) => return false };
+    let mut stream = match TcpStream::connect(&address) { Ok(stream) => stream, Err(_) => return false };
+    let timeout = Some(Duration::from_secs(125));
+    let _ = stream.set_read_timeout(timeout);
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let detail = serde_json::to_string(arguments).unwrap_or_default();
+    let request = json!({
+        "runId": run_id,
+        "token": token,
+        "confirmationId": confirmation_id,
+        "action": action,
+        "detail": detail,
+    });
+    if writeln!(stream, "{}", request).is_err() { return false; }
+    let mut response = String::new();
+    let mut reader = io::BufReader::new(stream);
+    if reader.read_line(&mut response).is_err() { return false; }
+    serde_json::from_str::<Value>(response.trim()).ok()
+        .and_then(|value| value.get("decision").and_then(Value::as_str).map(|value| value == "allow"))
+        .unwrap_or(false)
 }
 
 fn command_parts(command: &str) -> Vec<String> {
@@ -3572,6 +3654,17 @@ fn append_common_global_args(
 }
 
 fn run_cli(args: &[String], stdin_body: Option<String>, timeout_ms: u64) -> Result<CliRun, String> {
+    #[cfg(windows)]
+    {
+        return run_cli_windows(args, stdin_body, timeout_ms);
+    }
+
+    #[cfg(not(windows))]
+    run_cli_piped(args, stdin_body, timeout_ms)
+}
+
+#[cfg(not(windows))]
+fn run_cli_piped(args: &[String], stdin_body: Option<String>, timeout_ms: u64) -> Result<CliRun, String> {
     let exe = env::current_exe().map_err(|e| e.to_string())?;
     let mut command = Command::new(exe);
     command
@@ -3647,6 +3740,61 @@ fn run_cli(args: &[String], stdin_body: Option<String>, timeout_ms: u64) -> Resu
     })
 }
 
+/// Windows detached daemon processes can inherit the MCP child's pipe handles
+/// even when their own stdio is redirected. Reading those pipes to EOF then
+/// blocks forever after the one-shot CLI child exits. Temporary files avoid
+/// descendant handle-lifetime coupling while preserving stdout and stderr.
+#[cfg(windows)]
+fn run_cli_windows(args: &[String], stdin_body: Option<String>, timeout_ms: u64) -> Result<CliRun, String> {
+    let exe = env::current_exe().map_err(|e| e.to_string())?;
+    let token = uuid::Uuid::new_v4();
+    let stdout_path = env::temp_dir().join(format!("agent-browser-mcp-{}-stdout", token));
+    let stderr_path = env::temp_dir().join(format!("agent-browser-mcp-{}-stderr", token));
+    let stdout_file = fs::File::create(&stdout_path).map_err(|e| e.to_string())?;
+    let stderr_file = fs::File::create(&stderr_path).map_err(|e| e.to_string())?;
+    let mut command = Command::new(exe);
+    command
+        .args(args)
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
+        .stdin(if stdin_body.is_some() { Stdio::piped() } else { Stdio::null() });
+
+    let result = (|| {
+        let mut child = command.spawn().map_err(|e| e.to_string())?;
+        if let Some(body) = stdin_body {
+            let mut stdin = child.stdin.take().ok_or_else(|| "failed to open child stdin".to_string())?;
+            stdin.write_all(body.as_bytes()).map_err(|e| format!("failed to write child stdin: {}", e))?;
+        }
+
+        let started = Instant::now();
+        let timeout = Duration::from_millis(timeout_ms);
+        let (exit_code, timed_out) = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break (status.code(), false),
+                Ok(None) if started.elapsed() >= timeout => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break (None, true);
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(20)),
+                Err(e) => return Err(e.to_string()),
+            }
+        };
+
+        let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
+        let mut stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+        if timed_out {
+            stderr = append_timeout_message(stderr, timeout_ms);
+        }
+        Ok(CliRun { exit_code, stdout, stderr })
+    })();
+
+    let _ = fs::remove_file(stdout_path);
+    let _ = fs::remove_file(stderr_path);
+    result
+}
+
+#[cfg(not(windows))]
 fn join_output(handle: thread::JoinHandle<io::Result<Vec<u8>>>) -> Result<String, String> {
     let bytes = handle
         .join()

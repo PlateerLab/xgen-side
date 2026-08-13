@@ -173,10 +173,11 @@ function isBrowserAction(value: string): value is BrowserActionCategory {
   return ['navigate', 'click', 'fill', 'eval', 'download', 'upload', 'snapshot', 'scroll', 'wait', 'read', 'get', 'interact', 'network', 'state'].includes(value);
 }
 
-const agentBrowserProfiles = new Set(['core', 'network', 'state', 'debug', 'tabs', 'react', 'mobile', 'all']);
+const agentBrowserProfiles = new Set(['core', 'network', 'state', 'debug', 'files', 'tabs', 'react', 'mobile', 'all']);
 const agentBrowserTools = new Set([
   'agent_browser_open', 'agent_browser_read', 'agent_browser_snapshot', 'agent_browser_click',
   'agent_browser_fill', 'agent_browser_type', 'agent_browser_press', 'agent_browser_check',
+  'agent_browser_upload', 'agent_browser_download',
   'agent_browser_uncheck', 'agent_browser_select', 'agent_browser_scroll',
   'agent_browser_wait_ms', 'agent_browser_wait_for_selector', 'agent_browser_wait_for_text',
   'agent_browser_wait_for_load', 'agent_browser_screenshot', 'agent_browser_get_text',

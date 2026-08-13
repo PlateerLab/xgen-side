@@ -122,6 +122,7 @@ export class LocalRunStore {
       providerId: request.providerId,
       model: request.model,
       mode: request.mode,
+      permissionMode: request.permissionMode ?? 'guard',
       page: request.pageContext ? {
         tabId: request.pageContext.tabId,
         title: request.pageContext.title,
@@ -132,6 +133,7 @@ export class LocalRunStore {
     await this.append(session, 'session.created', request.providerId, request.mode, {
       model: request.model,
       prompt: request.prompt,
+      permissionMode: request.permissionMode ?? 'guard',
     });
     if (request.pageContext) {
       await writeFile(join(directory, 'page-context.json'), JSON.stringify(request.pageContext, null, 2), 'utf8');

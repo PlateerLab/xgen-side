@@ -74,12 +74,7 @@ export class CodexAdapter implements ProviderAdapter {
     const extraEnvironment: Record<string, string> = { CODEX_HOME: home };
 
     if (browser) {
-      const toolProfiles = browser.toolProfiles.join(',') || 'core';
-      args.push(
-        '-c', `mcp_servers.xgen_browser.command=${tomlString(browser.executablePath)}`,
-        '-c', `mcp_servers.xgen_browser.args=["mcp","--tools",${tomlString(toolProfiles)}]`,
-        '-c', `mcp_servers.xgen_browser.env=${tomlInlineTable(browser.environment)}`,
-      );
+      args.push(...codexBrowserMcpOverrides(browser));
       Object.assign(extraEnvironment, browser.environment);
     }
     args.push('-');
@@ -106,6 +101,15 @@ export class CodexAdapter implements ProviderAdapter {
       }
     }
     return answer.trim();
+  }
+
+  isStreamComplete(line: string): boolean {
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      return event.type === 'turn.completed';
+    } catch {
+      return false;
+    }
   }
 
   parseStreamLine(line: string): ProviderStreamEvent[] {
@@ -168,6 +172,16 @@ export class CodexAdapter implements ProviderAdapter {
     ].join('\n'), 'utf8');
     return home;
   }
+}
+
+export function codexBrowserMcpOverrides(browser: BrowserBridge): string[] {
+  const toolProfiles = browser.toolProfiles.join(',') || 'core';
+  return [
+    '-c', `mcp_servers.xgen_browser.command=${tomlString(browser.executablePath)}`,
+    '-c', `mcp_servers.xgen_browser.args=["mcp","--tools",${tomlString(toolProfiles)}]`,
+    '-c', `mcp_servers.xgen_browser.env=${tomlInlineTable(browser.environment)}`,
+    '-c', 'mcp_servers.xgen_browser.default_tools_approval_mode="approve"',
+  ];
 }
 
 export function codexNpmExecutableCandidates(appData: string, architecture: NodeJS.Architecture): string[] {

@@ -41,6 +41,9 @@ This local CLI adapter is different from offering Claude subscription authentica
 - Browser-backed runs keep the native browser detached between capture events. XGEN Side attaches it briefly after meaningful browser actions, captures the visible result, deduplicates unchanged frames, and renders the screenshots in the activity rail.
 - Ask page captures the active tab title, URL, selection, and visible text. It is read-only and cannot navigate or click.
 - Browser agent attaches the current page context and the local `agent-browser` MCP tools. It can inspect and operate the Electron browser within the browser action policy.
+- A browser request started from general chat creates one run-owned `WebContentsView` tab. The renderer request ID links that tab to the existing provider run. General chat renders its progress and event screenshots; opening the Agent tab renders the live page and the same progress in the right panel without launching another provider process.
+- A browser request started from a normal browser side panel can explicitly reuse the attached tab. Snapshot capture and CDP targeting use the linked tab ID rather than whichever tab the user later activates.
+- Users may pin an enabled Skill in the general chat composer. An explicit Skill determines Auto mode's execution boundary while required primary and guard Skills remain route-controlled.
 
 Typing in the browser address bar remains normal navigation or search-engine search and does not start an AI run.
 
@@ -76,7 +79,9 @@ Browser actions, commands, files, XGEN, MCP servers, and model providers will ex
 
 Every provider run receives a UUID and a directory under `agent-data/sessions`. The directory contains `session.json`, `events.jsonl`, provider stdout and stderr, an isolated workspace, and page context when attached. The JSONL events use a versioned provider-neutral envelope and record live execution event metadata without duplicating response text into every event. A later AgentFlow replacement can replay or export the same history. Provider tokens and API keys are redacted and are never written intentionally.
 
-Application preferences live in `agent-data/settings.json`. General execution preferences, MCP enablement, and package-scoped Skill enablement use one versioned schema and an atomic local write. The renderer receives this store only through typed IPC and cannot choose an arbitrary settings path.
+Application preferences live in `agent-data/settings.json`. General execution preferences, global Agent upload/download decisions (`allow | ask | deny`), MCP enablement, and package-scoped Skill enablement use one versioned schema and an atomic local write. The renderer receives this store only through typed IPC and cannot choose an arbitrary settings path.
+
+For an `ask` file transfer, agent-browser holds the MCP call and sends an authenticated request to a loopback approval broker owned by Electron main. Only the context-isolated shell renderer can resolve the one-shot request; the provider can request a prompt but cannot approve itself. Missing brokers, timeouts, cancelled runs, and renderer loss fail closed. Ordinary page-initiated downloads are independently paused by Electron's `will-download` handler and use the same global decision.
 
 ## Security invariants
 
@@ -96,3 +101,10 @@ Application preferences live in `agent-data/settings.json`. General execution pr
 The repository keeps `upstream/main` as the source of agent-browser updates. Product work lives on XGEN branches. Avoid broad renames inside the engine because they make upstream merges expensive. Brand-specific commands should be exposed through a separate `xside` launcher or adapter.
 
 Apache 2.0 notices and relevant third-party attributions must remain in distributed source and binaries.
+
+
+## Private credential boundary
+
+The optional Auto login vault is separate from renderer-readable settings and run logs. Electron `safeStorage` encrypts each complete credential record; no plaintext fallback is permitted. Credential list/save responses contain only ID, label, exact origin, and timestamps. Decryption occurs only in the main process immediately before exact-origin autofill, and secret text is inserted through `WebContents.insertText` rather than embedded in JavaScript or returned over IPC.
+
+Autofill accepts HTTPS origins and loopback HTTP development origins only. It targets a visible active user-owned tab with no active Agent Run. The tab becomes credential-protected before decryption. Protected tabs cannot provide page context or screenshots, and their lifetime blocks agent tab creation, current-tab attachment, and automation target lookup. This prevents managed XGEN agent flows from receiving autofill data. A browser-wide development remote-debugging port is not a cryptographic isolation boundary; production hardening should place private authenticated browsing in a non-debuggable surface or process.

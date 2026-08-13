@@ -10,6 +10,8 @@ export interface BrowserBridge {
   executablePath: string;
   environment: Record<string, string>;
   toolProfiles: string[];
+  tabId: string;
+  targetId?: string;
 }
 
 export interface ProviderRunPlan {
@@ -34,4 +36,5 @@ export interface ProviderAdapter {
   ): Promise<ProviderRunPlan>;
   parseAnswer(stdout: string): string;
   parseStreamLine(line: string): ProviderStreamEvent[];
+  isStreamComplete?(line: string): boolean;
 }

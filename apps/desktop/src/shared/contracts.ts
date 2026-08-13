@@ -1,5 +1,8 @@
 export type ShellKind = 'powershell' | 'cmd' | 'wsl';
 
+export type BrowserTabOwner = 'user' | 'agent';
+export type BrowserAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+
 export interface BrowserTabState {
   id: string;
   title: string;
@@ -8,6 +11,9 @@ export interface BrowserTabState {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  owner: BrowserTabOwner;
+  agentRunId?: string;
+  agentStatus?: BrowserAgentStatus;
 }
 
 export interface BrowserLayoutState {
@@ -34,6 +40,7 @@ export interface CommandRequest {
 }
 
 export type PolicyDecision = 'allow' | 'ask' | 'deny';
+export type BrowserPermissionSetting = 'allow' | 'ask' | 'deny';
 
 export interface CommandResult {
   state: 'completed' | 'approval-required' | 'denied' | 'failed';
@@ -57,6 +64,9 @@ export type ProviderId = 'codex' | 'claude';
 export type ResolvedAgentMode = 'chat' | 'search' | 'page' | 'browser-agent';
 export type AgentMode = 'auto' | ResolvedAgentMode;
 export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
+export type AgentRunSource = 'chat' | 'browser-side';
+export type BrowserTargetPreference = 'new-agent-tab' | 'current-tab';
+export type AgentPermissionMode = 'read-only' | 'guard' | 'full-access';
 export type BrowserActionCategory = 'navigate' | 'click' | 'fill' | 'eval' | 'download' | 'upload' | 'snapshot' | 'scroll' | 'wait' | 'read' | 'get' | 'interact' | 'network' | 'state';
 
 export type SkillRuntimeKind = 'llm' | 'provider-web' | 'page-context' | 'agent-browser' | 'policy';
@@ -163,6 +173,10 @@ export interface AgentRunRequest {
   prompt: string;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   pageContext?: PageContext;
+  selectedSkillIds?: string[];
+  sourceSurface?: AgentRunSource;
+  browserTarget?: BrowserTargetPreference;
+  permissionMode?: AgentPermissionMode;
 }
 
 export interface AgentRunResult {
@@ -173,6 +187,7 @@ export interface AgentRunResult {
   durationMs: number;
   logDirectory: string;
   route?: SkillRoute;
+  browserTabId?: string;
 }
 
 export interface BrowserSnapshot {
@@ -188,9 +203,12 @@ export interface BrowserSnapshot {
 export type AgentRunEvent =
   | { type: 'run-started'; sessionId: string; at: string }
   | { type: 'skills-routed'; sessionId: string; at: string; route: SkillRoute }
+  | { type: 'browser-tab-attached'; sessionId: string; at: string; tab: BrowserTabState }
   | { type: 'provider-started'; sessionId: string; at: string; providerId: ProviderId; model: string; sandbox: string }
   | { type: 'text'; sessionId: string; at: string; text: string; mode: 'append' | 'replace' }
   | { type: 'activity'; sessionId: string; at: string; name: string; phase: 'started' | 'updated' | 'completed' | 'failed'; detail?: string }
+  | { type: 'approval-required'; sessionId: string; at: string; approvalId: string; action: string; detail?: string }
+  | { type: 'approval-resolved'; sessionId: string; at: string; approvalId: string; decision: 'allow' | 'deny' }
   | { type: 'browser-snapshot'; sessionId: string; at: string; snapshot: BrowserSnapshot }
   | { type: 'run-finished'; sessionId: string; at: string; state: AgentRunResult['state']; durationMs: number; error?: string };
 
@@ -198,6 +216,7 @@ export interface AgentRunHandle {
   id: string;
   result: Promise<AgentRunResult>;
   cancel(): Promise<boolean>;
+  respondToApproval(approvalId: string, decision: 'allow' | 'deny'): Promise<boolean>;
 }
 
 export interface LocalDataStatus {
@@ -218,13 +237,43 @@ export interface LocalMarkdownFile {
 export interface AppSettings {
   schemaVersion: 1;
   general: {
-    guard: boolean;
+    defaultPermissionMode: AgentPermissionMode;
     localLogs: boolean;
     compact: boolean;
+  };
+  browserPermissions: {
+    upload: BrowserPermissionSetting;
+    download: BrowserPermissionSetting;
   };
   mcpEnabled: Record<string, boolean>;
   skillEnabled: Record<string, boolean>;
 }
+
+export interface CredentialVaultStatus {
+  available: boolean;
+  backend?: 'basic_text' | 'gnome_libsecret' | 'kwallet' | 'kwallet5' | 'kwallet6' | 'unknown';
+  reason?: string;
+}
+
+export interface CredentialSummary {
+  id: string;
+  label: string;
+  origin: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CredentialSaveRequest {
+  id?: string;
+  label: string;
+  origin: string;
+  username: string;
+  password: string;
+}
+
+export type CredentialAutofillResult =
+  | { state: 'filled'; usernameFilled: boolean }
+  | { state: 'not-found' | 'origin-mismatch' | 'no-password-field' | 'unavailable' };
 
 export interface XgenSideApi {
   engine: {
@@ -265,6 +314,13 @@ export interface XgenSideApi {
   settings: {
     load(): Promise<AppSettings>;
     save(settings: AppSettings): Promise<AppSettings>;
+  };
+  credentials: {
+    status(): Promise<CredentialVaultStatus>;
+    list(): Promise<CredentialSummary[]>;
+    save(request: CredentialSaveRequest): Promise<CredentialSummary>;
+    remove(id: string): Promise<boolean>;
+    autofill(credentialId: string, tabId: string): Promise<CredentialAutofillResult>;
   };
   command: {
     run(request: CommandRequest): Promise<CommandResult>;

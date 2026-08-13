@@ -9,7 +9,7 @@
     "role": "primary",
     "modes": ["browser-agent"],
     "intents": ["open-url", "navigate", "visit", "tab-management", "scroll", "browser-inspection"],
-    "signals": ["open", "navigate", "visit", "go to", "switch tab", "scroll", "열어", "열고", "접속", "이동", "방문", "탭 전환", "스크롤"]
+    "signals": ["open", "navigate", "visit", "go to", "switch tab", "scroll", "compare prices", "compare retailers", "other stores", "open and compare", "열어", "열고", "접속", "이동", "방문", "탭 전환", "스크롤", "팔고 있는지", "팔고있는지", "판매하는지 비교", "가격 비교", "혜택 비교", "다른 쇼핑몰", "여러 쇼핑몰"]
   },
   "runtime": {
     "kind": "agent-browser",

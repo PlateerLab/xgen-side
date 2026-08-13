@@ -10,8 +10,10 @@ XGEN Side brings general chat, web research, and real browser automation togethe
 
 - Left panel: manage chat and browser sessions in one unified list
 - Center workspace: switch between general AI chat and real browser tabs
-- Right panel: ask questions and run tasks against the currently open page
+- Right panel: ask questions against a normal page, or inspect the same Agent Run that was started from general chat while its live browser tab is open
 - Browser Agent Overview: when a request requires browser work, display the selected skills, execution steps, target site, permitted actions, and event-driven browser screenshots
+- General chat Skill selector: pin an enabled Skill for a request, or leave it on Auto so the Skill Router chooses the execution boundary
+- Agent browser tabs: browser-backed chat requests receive a run-owned tab; opening it shows the live page with the same progress stream instead of starting a second run
 - Reasoning effort: use Auto, Fast, Balanced, Deep, or Very Deep for Codex models while unsupported providers keep their own default
 - Light and dark themes with the XGEN accent color `#305EEB`
 
@@ -42,6 +44,7 @@ Local run store
 - If a required skill is disabled, execution is blocked before the provider or browser starts.
 - Skill routing decisions and execution events are stored in the local session history.
 - Provider text and tool activity are streamed into the conversation while a run is active, and the user can stop the active run from the composer.
+- A browser-backed run is correlated by one renderer run ID across the general chat, its event screenshot rail, and its run-owned browser tab. Switching presentation surfaces never starts another provider process.
 
 ## Providers
 
@@ -52,7 +55,7 @@ XGEN Side is designed to use CLI providers authenticated on the user's machine w
 - Providers are registered in Settings; the provider and model are selected inside the chat composer
 - Provider-specific behavior is normalized behind a shared adapter contract
 
-XGEN Side does not store account passwords or subscription tokens. Authentication remains the responsibility of each provider's official CLI.
+XGEN Side does not read or store provider subscription tokens. Optional website Auto login passwords are stored only in a separate OS-encrypted local vault and are never returned to the AI provider. Authentication remains the responsibility of each provider's official CLI.
 
 ## Local execution and security
 
@@ -116,6 +119,8 @@ See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs
 - [x] Browser Agent Overview
 - [x] Local run history
 - [x] Real-time provider output and run cancellation
+- [x] Manual Skill selection for general chat requests
+- [x] Run-owned Agent browser tabs with shared progress in the browser side panel
 - [ ] Live Electron tab rendering inside the Overview
 - [ ] Approval UI for command and consequential browser actions
 - [ ] Windows installer and automatic updates

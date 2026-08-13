@@ -35,12 +35,17 @@ import {
 import { type FormEvent, type KeyboardEvent, type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { isRunLinkedTab, messagesForAgentTab } from './agent-run-link';
 import type {
   AgentMode,
+  AgentPermissionMode,
   AgentRunEvent,
   AgentRunHandle,
   AppSettings,
   BrowserSnapshot,
+  CredentialSaveRequest,
+  CredentialSummary,
+  CredentialVaultStatus,
   BrowserTabState,
   EngineStatus,
   LocalDataStatus,
@@ -53,7 +58,7 @@ import type {
 
 type Theme = 'light' | 'dark';
 type Surface = 'home' | 'browser' | 'settings';
-type SettingsSection = 'general' | 'providers' | 'mcp' | 'skills' | 'data';
+type SettingsSection = 'general' | 'auto-login' | 'providers' | 'mcp' | 'skills' | 'data';
 
 interface SkillDefinition extends SkillCatalogEntry {
   enabled: boolean;
@@ -79,11 +84,21 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   meta?: string;
+  runId?: string;
   overview?: {
+    runId?: string;
+    sessionId?: string;
+    browserTabId?: string;
     route: SkillRoute;
     status: 'running' | 'completed' | 'failed' | 'cancelled';
     prompt: string;
     activity?: string;
+    activities?: Array<{
+      id: string;
+      name: string;
+      phase: 'started' | 'updated' | 'completed' | 'failed';
+      detail?: string;
+    }>;
     snapshots?: BrowserSnapshot[];
   };
 }
@@ -105,11 +120,11 @@ const homeModes: Array<{ id: AgentMode; label: string }> = [
 const pageModes: Array<{ id: AgentMode; label: string }> = [
   { id: 'auto', label: 'Auto' },
   { id: 'page', label: 'Ask page' },
-  { id: 'search', label: 'Research' },
+  { id: 'search', label: 'Web research' },
   { id: 'browser-agent', label: 'Browser agent' },
 ];
 
-const initialPreferences: AppSettings['general'] = { guard: true, localLogs: true, compact: false };
+const initialPreferences: AppSettings['general'] = { defaultPermissionMode: 'guard', localLogs: true, compact: false };
 
 const mcpDefinitions: McpDefinition[] = [
   { id: 'browser', name: 'XGEN Browser', command: 'agent-browser mcp --tools core,tabs', transport: 'stdio', tools: ['tabs', 'open', 'snapshot', 'click', 'fill', 'read'], permissions: ['Loopback CDP only', 'Session action policy', 'No upload or download'], status: 'Connected' },
@@ -143,16 +158,21 @@ export function App(): ReactElement {
   const [theme, setTheme] = useState<Theme>('light');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
+  const [sourcePreviewOpen, setSourcePreviewOpen] = useState(false);
   const [address, setAddress] = useState('');
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
   const [authenticatingProviderId, setAuthenticatingProviderId] = useState<ProviderId | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>('codex');
   const [model, setModel] = useState('gpt-5.6-sol');
   const [homeMode, setHomeMode] = useState<AgentMode>('auto');
+  const [homeSelectedSkillId, setHomeSelectedSkillId] = useState('');
   const [pageMode, setPageMode] = useState<AgentMode>('auto');
+  const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('guard');
+  const [pageRoute, setPageRoute] = useState<SkillRoute>();
   const [homePrompt, setHomePrompt] = useState('');
   const [pagePrompt, setPagePrompt] = useState('');
   const [homeBusy, setHomeBusy] = useState(false);
+  const [runningChatId, setRunningChatId] = useState<string>();
   const [pageBusy, setPageBusy] = useState(false);
   const [homeMessages, setHomeMessages] = useState<ChatMessage[]>([]);
   const [pageMessages, setPageMessages] = useState<ChatMessage[]>([
@@ -167,21 +187,28 @@ export function App(): ReactElement {
   const [engine, setEngine] = useState<EngineStatus>();
   const [localData, setLocalData] = useState<LocalDataStatus>();
   const [settingsMessage, setSettingsMessage] = useState('');
+  const [credentialStatus, setCredentialStatus] = useState<CredentialVaultStatus>();
+  const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
   const [settingsSearch, setSettingsSearch] = useState('');
   const [skillSearch, setSkillSearch] = useState('');
   const [skillDomains, setSkillDomains] = useState<SkillDomain[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState<Record<string, boolean>>({ browser: true, xgen: true, filesystem: false });
   const [preferences, setPreferences] = useState(initialPreferences);
+  const [browserPermissions, setBrowserPermissions] = useState<AppSettings['browserPermissions']>({ upload: 'ask', download: 'ask' });
   const [settingsReady, setSettingsReady] = useState(false);
   const homeRunRef = useRef<AgentRunHandle | null>(null);
   const pageRunRef = useRef<AgentRunHandle | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.active), [tabs]);
   const selectedProvider = providers.find((provider) => provider.id === providerId);
+  const selectableSkills = useMemo(() => skillDomains.flatMap((domain) => domain.skills).filter((skill) => skill.enabled), [skillDomains]);
   const homeOverview = [...homeMessages].reverse().find((message) => message.overview)?.overview;
+  const activeAgentMessages = messagesForAgentTab([...homeMessages, ...pageMessages], activeTab);
+  const activeAgentOverview = activeAgentMessages.find((message) => message.overview)?.overview;
   const leftWidth = leftOpen ? 300 : 0;
-  const homeSnapshotVisible = surface === 'home' && Boolean(homeOverview?.route.browserVisible);
-  const homeDockWidth = homeSnapshotVisible ? 540 : 0;
+  const homeSnapshotVisible = surface === 'home' && !sourcePreviewOpen && Boolean(homeOverview?.route.browserVisible);
+  const homeSourcePreviewVisible = surface === 'home' && sourcePreviewOpen && Boolean(activeTab);
+  const homeDockWidth = homeSnapshotVisible || homeSourcePreviewVisible ? 540 : 0;
   const rightWidth = surface === 'browser' && rightOpen ? 372 : 0;
 
   useEffect(() => {
@@ -189,8 +216,11 @@ export function App(): ReactElement {
     void window.xgenSide.engine.status().then(setEngine);
     void refreshProviders();
     void window.xgenSide.localData.status().then(setLocalData);
+    void refreshCredentials();
     void Promise.all([window.xgenSide.settings.load(), window.xgenSide.skills.list()]).then(([saved, catalog]) => {
       setPreferences(saved.general);
+      setPermissionMode(saved.general.defaultPermissionMode);
+      setBrowserPermissions(saved.browserPermissions);
       setMcpEnabled(saved.mcpEnabled);
       setSkillDomains(groupSkillCatalog(catalog, saved.skillEnabled));
       setSettingsReady(true);
@@ -202,23 +232,23 @@ export function App(): ReactElement {
     if (!settingsReady) return;
     const skillEnabled = Object.fromEntries(skillDomains.flatMap((domain) => domain.skills.map((skill) => [skill.settingKey, skill.enabled])));
     const timer = window.setTimeout(() => {
-      void window.xgenSide.settings.save({ schemaVersion: 1, general: preferences, mcpEnabled, skillEnabled });
+      void window.xgenSide.settings.save({ schemaVersion: 1, general: preferences, browserPermissions, mcpEnabled, skillEnabled });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [mcpEnabled, preferences, settingsReady, skillDomains]);
+  }, [browserPermissions, mcpEnabled, preferences, settingsReady, skillDomains]);
 
   useEffect(() => setAddress(activeTab?.url ?? ''), [activeTab?.url]);
 
   useEffect(() => {
     void window.xgenSide.browser.setLayout({
-      visible: surface === 'browser',
+      visible: surface === 'browser' || homeSourcePreviewVisible,
       leftWidth,
-      rightWidth,
+      rightWidth: homeSourcePreviewVisible ? 540 : rightWidth,
       chromeHeight: 76,
-      placement: 'workspace',
+      placement: homeSourcePreviewVisible ? 'right-dock' : 'workspace',
       dockInset: 10,
     });
-  }, [leftWidth, rightWidth, surface]);
+  }, [homeSourcePreviewVisible, leftWidth, rightWidth, surface]);
 
   useEffect(() => {
     if (!authenticatingProviderId) return;
@@ -246,6 +276,39 @@ export function App(): ReactElement {
     };
   }, [authenticatingProviderId]);
 
+  async function refreshCredentials(): Promise<void> {
+    try {
+      const status = await window.xgenSide.credentials.status();
+      setCredentialStatus(status);
+      setCredentials(status.available ? await window.xgenSide.credentials.list() : []);
+    } catch (error) {
+      setCredentialStatus({ available: false, reason: error instanceof Error ? error.message : String(error) });
+      setCredentials([]);
+    }
+  }
+
+  async function saveCredential(request: CredentialSaveRequest): Promise<void> {
+    await window.xgenSide.credentials.save(request);
+    await refreshCredentials();
+  }
+
+  async function removeCredential(id: string): Promise<void> {
+    await window.xgenSide.credentials.remove(id);
+    await refreshCredentials();
+  }
+
+  async function autofillCredential(id: string): Promise<void> {
+    if (!activeTab) throw new Error('자동 로그인할 브라우저 탭을 먼저 선택하세요.');
+    setSourcePreviewOpen(false);
+    setSurface('browser');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    const result = await window.xgenSide.credentials.autofill(id, activeTab.id);
+    if (result.state !== 'filled') {
+      setSurface('settings');
+      throw new Error(credentialAutofillMessage(result.state));
+    }
+  }
+
   async function refreshProviders(): Promise<ProviderStatus[]> {
     const next = await window.xgenSide.providers.list();
     setProviders(next);
@@ -255,6 +318,11 @@ export function App(): ReactElement {
       setModel((value) => current.models.some((item) => item.id === value) ? value : (current.models[0]?.id ?? ''));
     }
     return next;
+  }
+
+  function changePermissionMode(nextMode: AgentPermissionMode): void {
+    setPermissionMode(nextMode);
+    setPreferences((current) => ({ ...current, defaultPermissionMode: nextMode }));
   }
 
   function changeProvider(nextId: ProviderId): void {
@@ -270,17 +338,37 @@ export function App(): ReactElement {
     setHomeMessages([]);
     setSurface('home');
     setRightOpen(false);
+    setSourcePreviewOpen(false);
   }
 
   async function createBrowserTab(): Promise<void> {
     setTabs(await window.xgenSide.browser.newTab());
+    setSourcePreviewOpen(false);
     setSurface('browser');
     setRightOpen(false);
   }
 
   async function openBrowserTab(id: string): Promise<void> {
-    setTabs(await window.xgenSide.browser.activateTab(id));
+    const nextTabs = await window.xgenSide.browser.activateTab(id);
+    setTabs(nextTabs);
+    setSourcePreviewOpen(false);
     setSurface('browser');
+    if (isRunLinkedTab(nextTabs.find((tab) => tab.id === id))) setRightOpen(true);
+  }
+
+  async function openSourcePreview(url: string): Promise<void> {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+    const nextTabs = sourcePreviewOpen && activeTab
+      ? await window.xgenSide.browser.navigate(parsed.toString())
+      : await window.xgenSide.browser.newTab(parsed.toString());
+    setTabs(nextTabs);
+    setSourcePreviewOpen(true);
   }
 
   async function closeBrowserTab(id: string): Promise<void> {
@@ -301,6 +389,7 @@ export function App(): ReactElement {
     setHomeMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }]);
     setHomePrompt('');
     setHomeBusy(true);
+    setRunningChatId(activeChatId);
     const request = {
       providerId,
       model,
@@ -308,6 +397,10 @@ export function App(): ReactElement {
       reasoningEffort: 'auto' as const,
       prompt: value,
       history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
+      selectedSkillIds: homeSelectedSkillId ? [homeSelectedSkillId] : undefined,
+      sourceSurface: 'chat' as const,
+      browserTarget: 'new-agent-tab' as const,
+      permissionMode,
     };
     let overviewId: string | undefined;
     const responseId = crypto.randomUUID();
@@ -316,23 +409,34 @@ export function App(): ReactElement {
     try {
       const routed = await window.xgenSide.skills.route(request);
       route = routed;
-      const showOverview = routed.browserVisible || routed.skills.some((skill) => skill.id !== 'xgen.conversation');
-      overviewId = showOverview ? crypto.randomUUID() : undefined;
-      const overviewMessages: ChatMessage[] = overviewId ? [{
+      overviewId = crypto.randomUUID();
+      const overviewMessages: ChatMessage[] = [{
         id: overviewId,
         role: 'assistant',
         content: '',
         overview: { route: routed, status: 'running', prompt: value },
-      }] : [];
+      }];
       setHomeMessages((current) => [...current,
         ...overviewMessages,
         { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' },
       ]);
-      const handle = window.xgenSide.agent.start(request, (runEvent) => {
+      let handle: AgentRunHandle;
+      handle = window.xgenSide.agent.start(request, (runEvent) => {
         setHomeMessages((current) => applyRunEvent(current, responseId, overviewId, runEvent));
+        if (runEvent.type === 'approval-required') {
+          const allowed = window.confirm(`${runEvent.action} 작업을 허용할까요?\n\n${runEvent.detail ?? ''}`);
+          void handle.respondToApproval(runEvent.approvalId, allowed ? 'allow' : 'deny');
+        }
       });
       homeRunRef.current = handle;
       activeRunId = handle.id;
+      setHomeMessages((current) => current.map((message) => {
+        if (message.id === responseId) return { ...message, runId: handle.id };
+        if (overviewId && message.id === overviewId && message.overview) {
+          return { ...message, overview: { ...message.overview, runId: handle.id } };
+        }
+        return message;
+      }));
       const result = await handle.result;
       setHomeMessages((current) => current.map((message) => overviewId && message.id === overviewId ? {
         ...message,
@@ -341,6 +445,7 @@ export function App(): ReactElement {
           route: result.route ?? routed,
           status: result.state === 'completed' ? 'completed' : result.state === 'cancelled' ? 'cancelled' : 'failed',
           prompt: value,
+          browserTabId: result.browserTabId ?? message.overview?.browserTabId,
         },
       } : message));
       setHomeMessages((current) => current.map((message) => message.id === responseId ? {
@@ -365,6 +470,7 @@ export function App(): ReactElement {
     } finally {
       if (homeRunRef.current?.id === activeRunId) homeRunRef.current = null;
       setHomeBusy(false);
+      setRunningChatId(undefined);
     }
   }
 
@@ -376,31 +482,69 @@ export function App(): ReactElement {
     setPagePrompt('');
     setPageBusy(true);
     const responseId = crypto.randomUUID();
+    const overviewId = crypto.randomUUID();
     let activeRunId: string | undefined;
+    let route: SkillRoute | undefined;
     try {
       const pageContext = await window.xgenSide.browser.getPageContext();
       if (!pageContext) throw new Error('현재 페이지를 읽을 수 없습니다.');
-      setPageMessages((current) => [...current, { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' }]);
-      const handle = window.xgenSide.agent.start({
+      const request = {
         providerId,
         model,
         mode: pageMode,
-        reasoningEffort: 'auto',
+        reasoningEffort: 'auto' as const,
         prompt: value,
         pageContext,
         history: pageMessages.map(({ role, content }) => ({ role, content })),
-      }, (runEvent) => {
-        setPageMessages((current) => applyRunEvent(current, responseId, undefined, runEvent));
+        sourceSurface: 'browser-side' as const,
+        browserTarget: 'current-tab' as const,
+        permissionMode,
+      };
+      const routed = await window.xgenSide.skills.route(request);
+      route = routed;
+      setPageRoute(routed);
+      setPageMessages((current) => [...current,
+        { id: overviewId, role: 'assistant', content: '', overview: { route: routed, status: 'running', prompt: value } },
+        { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' },
+      ]);
+      let handle: AgentRunHandle;
+      handle = window.xgenSide.agent.start(request, (runEvent) => {
+        setPageMessages((current) => applyRunEvent(current, responseId, overviewId, runEvent));
+        if (runEvent.type === 'approval-required') {
+          const allowed = window.confirm(`${runEvent.action} 작업을 허용할까요?\n\n${runEvent.detail ?? ''}`);
+          void handle.respondToApproval(runEvent.approvalId, allowed ? 'allow' : 'deny');
+        }
       });
       pageRunRef.current = handle;
       activeRunId = handle.id;
+      setPageMessages((current) => current.map((message) => {
+        if (message.id === responseId) return { ...message, runId: handle.id };
+        if (message.id === overviewId && message.overview) {
+          return { ...message, overview: { ...message.overview, runId: handle.id } };
+        }
+        return message;
+      }));
       const result = await handle.result;
+      setPageMessages((current) => current.map((message) => message.id === overviewId && message.overview ? {
+        ...message,
+        overview: {
+          ...message.overview,
+          route: result.route ?? routed,
+          status: result.state === 'completed' ? 'completed' : result.state === 'cancelled' ? 'cancelled' : 'failed',
+          browserTabId: result.browserTabId ?? message.overview.browserTabId,
+        },
+      } : message));
       setPageMessages((current) => current.map((message) => message.id === responseId ? {
         ...message,
         content: result.answer || message.content || result.error || '응답이 없습니다.',
         meta: `${runStateLabel(result.state)} · 로컬 기록 ${result.sessionId.slice(0, 8)}`,
       } : message));
     } catch (error) {
+      if (route) {
+        setPageMessages((current) => current.map((message) => message.id === overviewId && message.overview
+          ? { ...message, overview: { ...message.overview, status: 'failed' } }
+          : message));
+      }
       setPageMessages((current) => current.some((message) => message.id === responseId)
         ? current.map((message) => message.id === responseId ? {
           ...message,
@@ -431,7 +575,9 @@ export function App(): ReactElement {
     setPageBusy(false);
     setPageMessages((current) => current.map((message) => message.meta?.includes('실행')
       ? { ...message, meta: '중지됨' }
-      : message));
+      : message.overview?.status === 'running'
+        ? { ...message, overview: { ...message.overview, status: 'cancelled', activity: '사용자가 실행을 중지했습니다' } }
+        : message));
   }
 
   async function connectProvider(id: ProviderId): Promise<void> {
@@ -466,6 +612,7 @@ export function App(): ReactElement {
           onToggleTheme={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
           settingsSearch={settingsSearch}
           settingsSection={settingsSection}
+          runningChatId={runningChatId}
           surface={surface}
           tabs={tabs}
           theme={theme}
@@ -482,12 +629,15 @@ export function App(): ReactElement {
           messages={homeMessages}
           mode={homeMode}
           model={model}
+          permissionMode={permissionMode}
           onChangeMode={setHomeMode}
+          onChangePermissionMode={changePermissionMode}
           onChangeModel={setModel}
           onChangePrompt={setHomePrompt}
           onChangeProvider={changeProvider}
           onCancel={() => void cancelHomeRun()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
+          onOpenSource={(url) => void openSourcePreview(url)}
           onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
           onSubmit={(event) => void sendHomeMessage(event)}
           prompt={homePrompt}
@@ -495,20 +645,42 @@ export function App(): ReactElement {
           providers={providers}
           rightWidth={homeDockWidth}
           selectedProvider={selectedProvider}
+          skills={selectableSkills}
+          selectedSkillId={homeSelectedSkillId}
+          onChangeSelectedSkill={setHomeSelectedSkillId}
           tabs={tabs}
         />
       )}
-      {surface === 'home' && homeOverview?.route.browserVisible && (
-        <BrowserSnapshotRail busy={homeBusy} overview={homeOverview} />
+      {surface === 'home' && homeSnapshotVisible && homeOverview && (
+        <BrowserSnapshotRail busy={homeBusy} overview={homeOverview} onOpenBrowser={(id) => void openBrowserTab(id)} />
+      )}
+      {homeSourcePreviewVisible && activeTab && (
+        <SourcePreviewDock
+          tab={activeTab}
+          onBack={() => void window.xgenSide.browser.back()}
+          onClose={() => setSourcePreviewOpen(false)}
+          onOpenBrowser={() => {
+            setSourcePreviewOpen(false);
+            setSurface('browser');
+          }}
+          onReload={() => void window.xgenSide.browser.reload()}
+        />
       )}
       {surface === 'settings' && (
         <SettingsSurface
           activeSection={settingsSection}
+          browserPermissions={browserPermissions}
+          credentialStatus={credentialStatus}
+          credentials={credentials}
           leftWidth={leftWidth}
           localData={localData}
           mcpEnabled={mcpEnabled}
           message={settingsMessage}
           onConnect={(id) => void connectProvider(id)}
+          onAutofillCredential={(id) => void autofillCredential(id).catch((error) => setSettingsMessage(error instanceof Error ? error.message : String(error)))}
+          onRemoveCredential={(id) => void removeCredential(id).catch((error) => setSettingsMessage(error instanceof Error ? error.message : String(error)))}
+          onSaveCredential={(request) => saveCredential(request)}
+          onSetBrowserPermissions={setBrowserPermissions}
           onSetMcpEnabled={(id, enabled) => setMcpEnabled((current) => ({ ...current, [id]: enabled }))}
           onSetPreferences={setPreferences}
           onOpenData={() => void window.xgenSide.localData.open()}
@@ -544,15 +716,23 @@ export function App(): ReactElement {
       {surface === 'browser' && rightOpen && (
         <AgentPanel
           activeTab={activeTab}
+          activeRoute={pageRoute}
           busy={pageBusy}
+          linkedMessages={activeAgentMessages}
           messages={pageMessages}
           mode={pageMode}
           model={model}
+          permissionMode={permissionMode}
           onChangeMode={setPageMode}
+          onChangePermissionMode={changePermissionMode}
           onChangeModel={setModel}
           onChangePrompt={setPagePrompt}
           onChangeProvider={changeProvider}
           onCancel={() => void cancelPageRun()}
+          onCancelLinked={() => {
+            if (activeTab?.agentRunId === homeRunRef.current?.id) void cancelHomeRun();
+            else if (activeTab?.agentRunId === pageRunRef.current?.id) void cancelPageRun();
+          }}
           onClose={() => setRightOpen(false)}
           onSubmit={(event) => void sendPageMessage(event)}
           prompt={pagePrompt}
@@ -581,6 +761,7 @@ interface LeftPanelProps {
   onToggleTheme(): void;
   settingsSearch: string;
   settingsSection: SettingsSection;
+  runningChatId?: string;
   surface: Surface;
   tabs: BrowserTabState[];
   theme: Theme;
@@ -589,6 +770,7 @@ interface LeftPanelProps {
 function LeftPanel(props: LeftPanelProps): ReactElement {
   const settingsItems: Array<{ id: SettingsSection; label: string; description: string; icon: ReactElement }> = [
     { id: 'general', label: 'General', description: '앱 동작과 실행 기본값', icon: <Settings24Regular /> },
+    { id: 'auto-login', label: 'Auto login', description: '암호화된 사이트 로그인', icon: <ShieldLock24Regular /> },
     { id: 'providers', label: 'AI Providers', description: 'Codex와 Claude Code', icon: <BotSparkle24Filled /> },
     { id: 'mcp', label: 'MCP', description: '로컬 도구와 서버 연결', icon: <PlugConnected24Regular /> },
     { id: 'skills', label: 'Skills', description: '사이트별 브라우저 능력', icon: <PuzzlePiece24Regular /> },
@@ -632,7 +814,9 @@ function LeftPanel(props: LeftPanelProps): ReactElement {
           <div className="nav-list">
             {props.chats.map((chat) => (
               <button className={props.surface === 'home' && props.activeChatId === chat.id ? 'nav-row active' : 'nav-row'} key={chat.id} onClick={() => props.onOpenChat(chat.id)}>
-                {props.surface === 'home' && props.activeChatId === chat.id ? <Chat24Filled /> : <Chat24Regular />}
+                {props.runningChatId === chat.id
+                  ? <span className="nav-progress-ring" aria-label="채팅 실행 중" />
+                  : props.surface === 'home' && props.activeChatId === chat.id ? <Chat24Filled /> : <Chat24Regular />}
                 <span className="nav-copy"><strong>{chat.title}</strong><small>{chat.time}</small></span>
               </button>
             ))}
@@ -644,8 +828,10 @@ function LeftPanel(props: LeftPanelProps): ReactElement {
             {props.tabs.map((tab) => (
               <div className={props.surface === 'browser' && tab.active ? 'nav-row active' : 'nav-row'} key={tab.id}>
                 <button className="nav-row-open" onClick={() => props.onOpenBrowser(tab.id)} aria-label={tab.title || '새 브라우저 탭'}>
-                  {tab.url.includes('google.com') ? <Globe24Regular /> : <TabDesktop24Regular />}
-                  <span className="nav-copy"><strong>{tab.loading ? '불러오는 중' : tab.title || '새 탭'}</strong><small>{formatHost(tab.url)}</small></span>
+                  {tab.agentStatus === 'running'
+                    ? <span className="nav-progress-ring" aria-label="브라우저 작업 실행 중" />
+                    : tab.agentRunId ? <BotSparkle24Filled /> : tab.url.includes('google.com') ? <Globe24Regular /> : <TabDesktop24Regular />}
+                  <span className="nav-copy"><strong>{tab.agentRunId ? `Agent · ${tab.loading ? '불러오는 중' : tab.title || '작업 탭'}` : tab.loading ? '불러오는 중' : tab.title || '새 탭'}</strong><small>{tab.agentRunId ? `${agentStatusLabel(tab.agentStatus)} · ${formatHost(tab.url)}` : formatHost(tab.url)}</small></span>
                 </button>
                 <button className="row-close" aria-label="브라우저 탭 닫기" onClick={() => props.onCloseBrowser(tab.id)}><Dismiss24Regular /></button>
               </div>
@@ -669,7 +855,9 @@ interface ConversationSurfaceProps {
   messages: ChatMessage[];
   mode: AgentMode;
   model: string;
+  permissionMode: AgentPermissionMode;
   onChangeMode(value: AgentMode): void;
+  onChangePermissionMode(value: AgentPermissionMode): void;
   onChangeModel(value: string): void;
   onChangePrompt(value: string): void;
   onChangeProvider(value: ProviderId): void;
@@ -679,12 +867,16 @@ interface ConversationSurfaceProps {
   providerId: ProviderId;
   providers: ProviderStatus[];
   selectedProvider?: ProviderStatus;
+  skills?: SkillDefinition[];
+  selectedSkillId?: string;
+  onChangeSelectedSkill?(value: string): void;
 }
 
 function HomeSurface(props: ConversationSurfaceProps & {
   chats: ChatSession[];
   leftWidth: number;
   onOpenBrowser(id: string): void;
+  onOpenSource(url: string): void;
   onOpenChat(id: string): void;
   rightWidth: number;
   tabs: BrowserTabState[];
@@ -702,7 +894,7 @@ function HomeSurface(props: ConversationSurfaceProps & {
         {props.messages.length ? (
           <>
             <div className={hasOverview ? 'conversation-stream overview-stream' : 'conversation-stream'} role="region" tabIndex={0} aria-label="대화 내용">
-              {props.messages.map((message) => <MessageBubble key={message.id} message={message} />)}
+              {props.messages.map((message) => <MessageBubble key={message.id} message={message} onOpenLink={props.onOpenSource} />)}
             </div>
             {composer}
           </>
@@ -782,7 +974,24 @@ function BrowserChrome(props: {
   );
 }
 
-function AgentPanel(props: ConversationSurfaceProps & { activeTab?: BrowserTabState; onClose(): void }): ReactElement {
+function AgentPanel(props: ConversationSurfaceProps & {
+  activeRoute?: SkillRoute;
+  activeTab?: BrowserTabState;
+  linkedMessages: ChatMessage[];
+  onCancelLinked(): void;
+  onClose(): void;
+}): ReactElement {
+  const linkedOverview = props.linkedMessages.find((message) => message.overview)?.overview;
+  const isAgentTab = isRunLinkedTab(props.activeTab);
+  const effectiveMode = linkedOverview?.route.resolvedMode ?? props.activeRoute?.resolvedMode ?? props.mode;
+  const messages = isAgentTab ? props.linkedMessages : props.messages;
+  const modeDescription: Record<AgentMode, string> = {
+    auto: '자동 선택 · 요청에 따라 현재 페이지 읽기, 웹 검색, 브라우저 조작을 구분',
+    chat: '대화 전용 · 브라우저와 분리',
+    page: '현재 페이지 읽기 · 브라우저를 조작하지 않음',
+    search: '백그라운드 웹 검색 · 중앙 브라우저를 조작하지 않음',
+    'browser-agent': '라이브 브라우저 · 일반 채팅에서 시작한 같은 작업을 표시',
+  };
   return (
     <aside className="agent-panel glass-panel">
       <header className="agent-header">
@@ -790,13 +999,41 @@ function AgentPanel(props: ConversationSurfaceProps & { activeTab?: BrowserTabSt
         <button className="icon-button" onClick={props.onClose} aria-label="오른쪽 패널 닫기"><PanelRightContract24Regular /></button>
       </header>
       <div className="page-context">
-        <div className="context-heading"><Document24Regular /><strong>Attached page</strong></div>
+        <div className="context-heading">{isAgentTab ? <BotSparkle24Filled /> : <Document24Regular />}<strong>{isAgentTab ? 'Agent browser' : 'Attached page'}</strong></div>
         <p>{props.activeTab?.title || '현재 페이지'}</p>
         <span><Globe24Regular />{formatHost(props.activeTab?.url)}</span>
       </div>
-      <div className="mode-explainer">{props.mode === 'page' ? '읽기 전용 · 현재 탭만 답변에 첨부' : '작업 모드 · agent-browser가 현재 탭을 조작'}</div>
-      <div className="agent-stream">{props.messages.map((message) => <MessageBubble key={message.id} message={message} />)}</div>
-      <Composer {...props} modes={pageModes} placeholder={props.mode === 'page' ? '이 페이지에 대해 질문하세요' : '브라우저에서 수행할 작업을 요청하세요'} />
+      <div className={`mode-explainer mode-${effectiveMode}`}>{modeDescription[effectiveMode]}</div>
+      <div className="agent-stream">{messages.length
+        ? messages.map((message) => <MessageBubble key={message.id} message={message} />)
+        : <div className="linked-run-empty"><History24Regular /><span><strong>연결된 작업을 불러오는 중</strong><small>일반 채팅의 Agent Run과 동일한 진행 상태를 표시합니다.</small></span></div>}
+      </div>
+      {isAgentTab
+        ? <div className="linked-run-controls"><span>{linkedOverview?.status === 'running' ? 'Agent가 이 탭에서 작업 중입니다.' : '이 Agent Run의 실행 기록입니다.'}</span>{linkedOverview?.status === 'running' && <button type="button" onClick={props.onCancelLinked}><Dismiss24Regular />중지</button>}</div>
+        : <Composer {...props} modes={pageModes} placeholder={props.mode === 'page' ? '이 페이지에 대해 질문하세요' : '브라우저에서 수행할 작업을 요청하세요'} />}
+    </aside>
+  );
+}
+
+function SourcePreviewDock(props: {
+  tab: BrowserTabState;
+  onBack(): void;
+  onClose(): void;
+  onOpenBrowser(): void;
+  onReload(): void;
+}): ReactElement {
+  return (
+    <aside className="source-preview-dock" aria-label="출처 미리보기">
+      <header className="source-preview-header">
+        <div className="source-preview-identity"><Globe24Regular /><span><strong>{props.tab.title || '출처 미리보기'}</strong><small>{formatHost(props.tab.url)}</small></span></div>
+        <div className="source-preview-actions">
+          <button className="icon-button" onClick={props.onBack} disabled={!props.tab.canGoBack} aria-label="미리보기 뒤로"><ArrowLeft24Regular /></button>
+          <button className="icon-button" onClick={props.onReload} aria-label="미리보기 새로고침"><ArrowClockwise24Regular /></button>
+          <button className="icon-button" onClick={props.onOpenBrowser} aria-label="브라우저에서 크게 열기"><Open24Regular /></button>
+          <button className="icon-button" onClick={props.onClose} aria-label="미리보기 닫기"><Dismiss24Regular /></button>
+        </div>
+      </header>
+      <div className="source-preview-underlay"><Globe24Regular /><span><strong>{props.tab.loading ? '출처를 불러오는 중' : '출처 미리보기'}</strong><small>{props.tab.url}</small></span></div>
     </aside>
   );
 }
@@ -804,13 +1041,16 @@ function AgentPanel(props: ConversationSurfaceProps & { activeTab?: BrowserTabSt
 function BrowserSnapshotRail(props: {
   busy: boolean;
   overview: NonNullable<ChatMessage['overview']>;
+  onOpenBrowser(id: string): void;
 }): ReactElement {
   const snapshots = props.overview.snapshots ?? [];
   return (
     <aside className="browser-snapshot-rail" aria-label="브라우저 작업 캡처">
       <header className="snapshot-rail-header">
         <div><span className={props.busy ? 'live-browser-status active' : 'live-browser-status'} /><span><strong>Browser activity</strong><small>{props.busy ? '화면이 바뀔 때 캡처합니다' : '작업 캡처 완료'}</small></span></div>
-        <span className="snapshot-mode"><Globe24Regular />Snapshots</span>
+        {props.overview.browserTabId
+          ? <button className="snapshot-mode open-live-browser" onClick={() => props.onOpenBrowser(props.overview.browserTabId!)}><Open24Regular />Live browser</button>
+          : <span className="snapshot-mode"><Globe24Regular />Snapshots</span>}
       </header>
       <div className="snapshot-list">
         {snapshots.length ? snapshots.map((snapshot, index) => (
@@ -825,13 +1065,84 @@ function BrowserSnapshotRail(props: {
   );
 }
 
+function CredentialSettings(props: {
+  credentials: CredentialSummary[];
+  status?: CredentialVaultStatus;
+  onAutofill(id: string): void;
+  onRemove(id: string): void;
+  onSave(request: CredentialSaveRequest): Promise<void>;
+}): ReactElement {
+  const [editing, setEditing] = useState<CredentialSummary | null | undefined>();
+  const [label, setLabel] = useState('');
+  const [origin, setOrigin] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [removeId, setRemoveId] = useState<string>();
+  const available = props.status?.available === true;
+  const begin = (credential?: CredentialSummary): void => {
+    setEditing(credential ?? null);
+    setLabel(credential?.label ?? '');
+    setOrigin(credential?.origin ?? '');
+    setUsername('');
+    setPassword('');
+    setMessage('');
+  };
+  const cancel = (): void => {
+    setEditing(undefined);
+    setUsername('');
+    setPassword('');
+    setMessage('');
+  };
+  const submit = async (event: FormEvent): Promise<void> => {
+    event.preventDefault();
+    try {
+      await props.onSave({ id: editing?.id, label, origin, username, password });
+      cancel();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+  return (
+    <div className="settings-section-stack credential-settings">
+      <div className={available ? 'settings-inline-note secure' : 'settings-inline-note warning'}><ShieldLock24Regular /><span><strong>{available ? 'OS-backed encryption ready' : 'Secure vault unavailable'}</strong><small>{available ? '비밀번호는 암호화되어 로컬에만 저장되며 renderer와 AI에 반환되지 않습니다.' : props.status?.reason ?? '암호화 상태를 확인하는 중입니다.'}</small></span></div>
+      <SettingsGroup title="Saved logins" description="정확히 일치하는 사이트 origin에서만 현재 사용자 탭에 입력됩니다. 자동 로그인한 탭은 AI 자동화에서 격리됩니다.">
+        <div className="credential-toolbar"><button className="provider-action" disabled={!available} onClick={() => begin()}>로그인 추가</button></div>
+        <div className="credential-list">{props.credentials.length ? props.credentials.map((credential) => (
+          <div className="credential-row" key={credential.id}>
+            <div><strong>{credential.label}</strong><small>{credential.origin}</small></div>
+            <div className="credential-row-actions"><button className="quiet-action" onClick={() => props.onAutofill(credential.id)}>현재 탭에 입력</button><button className="quiet-action" onClick={() => begin(credential)}>교체</button>{removeId === credential.id ? <><button className="quiet-action destructive" onClick={() => { props.onRemove(credential.id); setRemoveId(undefined); }}>삭제 확인</button><button className="quiet-action" onClick={() => setRemoveId(undefined)}>취소</button></> : <button className="quiet-action destructive" onClick={() => setRemoveId(credential.id)}>삭제</button>}</div>
+          </div>
+        )) : <div className="empty-settings">저장된 로그인이 없습니다.</div>}</div>
+      </SettingsGroup>
+      {editing !== undefined && <form className="credential-form" onSubmit={(event) => void submit(event)}>
+        <h2>{editing ? '로그인 교체' : '로그인 추가'}</h2>
+        <p>교체할 때도 사용자 이름과 비밀번호를 다시 입력해야 합니다. 저장된 평문은 화면으로 읽어오지 않습니다.</p>
+        <label className="credential-field"><span>Label</span><input value={label} onChange={(event) => setLabel(event.target.value)} required maxLength={100} autoComplete="off" /></label>
+        <label className="credential-field"><span>Website origin</span><input value={origin} onChange={(event) => setOrigin(event.target.value)} required placeholder="https://example.com" inputMode="url" autoComplete="off" /></label>
+        <label className="credential-field"><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} required autoComplete="off" /></label>
+        <label className="credential-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required autoComplete="new-password" /></label>
+        {message && <div className="settings-notice">{message}</div>}
+        <div className="credential-form-actions"><button type="button" className="quiet-action" onClick={cancel}>취소</button><button className="provider-action" type="submit" disabled={!available}>암호화하여 저장</button></div>
+      </form>}
+    </div>
+  );
+}
+
 function SettingsSurface(props: {
   activeSection: SettingsSection;
+  browserPermissions: AppSettings['browserPermissions'];
+  credentialStatus?: CredentialVaultStatus;
+  credentials: CredentialSummary[];
   leftWidth: number;
   localData?: LocalDataStatus;
   mcpEnabled: Record<string, boolean>;
   message: string;
   onConnect(id: ProviderId): void;
+  onAutofillCredential(id: string): void;
+  onRemoveCredential(id: string): void;
+  onSaveCredential(request: CredentialSaveRequest): Promise<void>;
+  onSetBrowserPermissions(value: AppSettings['browserPermissions']): void;
   onSetMcpEnabled(id: string, enabled: boolean): void;
   onOpenData(): void;
   onRefresh(): void;
@@ -846,6 +1157,7 @@ function SettingsSurface(props: {
 }): ReactElement {
   const sectionCopy: Record<SettingsSection, { eyebrow: string; title: string; description: string }> = {
     general: { eyebrow: 'XGEN Side', title: 'General', description: '브라우저와 로컬 agent 실행의 기본 동작을 설정합니다.' },
+    'auto-login': { eyebrow: 'Private vault', title: 'Auto login', description: 'OS 암호화로 저장한 로그인 정보를 현재 사이트에 직접 입력합니다.' },
     providers: { eyebrow: 'Models', title: 'AI Providers', description: '공식 로컬 CLI와 구독 계정 연결 상태를 관리합니다.' },
     mcp: { eyebrow: 'Tools', title: 'MCP', description: 'agent가 사용할 로컬 도구 서버와 권한 범위를 관리합니다.' },
     skills: { eyebrow: 'Browser intelligence', title: 'Skills', description: '도메인별로 자동 활성화할 브라우저 능력을 선택합니다.' },
@@ -859,14 +1171,18 @@ function SettingsSurface(props: {
       <header className="settings-topbar"><span>Settings <ChevronRight24Regular /> {copy.title}</span><button className="icon-button" onClick={props.onRefresh} aria-label="상태 새로고침"><ArrowClockwise24Regular /></button></header>
       <div className={isWorkbench ? 'settings-content settings-workbench-content' : 'settings-content settings-detail-scroll'}>
         {!isWorkbench && <div className="settings-page-heading"><span>{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div>}
-        {props.message && props.activeSection === 'providers' && <div className="settings-notice">{props.message}</div>}
+        {props.message && ['providers', 'auto-login'].includes(props.activeSection) && <div className="settings-notice">{props.message}</div>}
 
         {props.activeSection === 'general' && (
           <div className="settings-section-stack">
             <SettingsGroup title="Agent behavior" description="모든 provider에 동일하게 적용되는 기본 실행 정책입니다.">
-              <SettingsRow title="Guard by default" description="외부 변경이나 중요한 브라우저 동작은 실행 전에 확인합니다."><Toggle checked={props.preferences.guard} onChange={(checked) => props.onSetPreferences((current) => ({ ...current, guard: checked }))} /></SettingsRow>
+              <SettingsRow title="Default agent permission" description="새 요청에서 사용할 기본 권한입니다. 입력창에서 실행별로 변경할 수 있습니다."><AgentPermissionSelect value={props.preferences.defaultPermissionMode} onChange={(defaultPermissionMode) => props.onSetPreferences((current) => ({ ...current, defaultPermissionMode }))} /></SettingsRow>
               <SettingsRow title="Local run history" description="실행 단계와 provider 출력을 로컬 JSONL로 기록합니다."><Toggle checked={props.preferences.localLogs} onChange={(checked) => props.onSetPreferences((current) => ({ ...current, localLogs: checked }))} /></SettingsRow>
               <SettingsRow title="Compact interface" description="사이드 패널과 설정 행의 간격을 줄여 더 많은 정보를 표시합니다."><Toggle checked={props.preferences.compact} onChange={(checked) => props.onSetPreferences((current) => ({ ...current, compact: checked }))} /></SettingsRow>
+            </SettingsGroup>
+            <SettingsGroup title="Browser permissions" description="모든 Skill과 브라우저 작업에 동일하게 적용됩니다. Ask는 해당 동작이 실행될 때 한 번 확인합니다.">
+              <SettingsRow title="Downloads" description="사이트가 파일을 내려받기 전에 적용할 기본 정책입니다."><PermissionSelect value={props.browserPermissions.download} onChange={(download) => props.onSetBrowserPermissions({ ...props.browserPermissions, download })} /></SettingsRow>
+              <SettingsRow title="Uploads" description="Agent가 로컬 파일을 외부 사이트에 전송하기 전에 적용할 기본 정책입니다."><PermissionSelect value={props.browserPermissions.upload} onChange={(upload) => props.onSetBrowserPermissions({ ...props.browserPermissions, upload })} /></SettingsRow>
             </SettingsGroup>
             <SettingsGroup title="Execution" description="Windows에서 agent를 실행하는 기본 환경입니다.">
               <SettingsRow title="Agent runtime" description="공식 provider CLI를 직접 실행하는 로컬 Windows 환경입니다."><span className="setting-value">Windows native</span></SettingsRow>
@@ -874,6 +1190,16 @@ function SettingsSurface(props: {
               <SettingsRow title="Browser engine" description="현재 Electron 탭과 연결되는 자동화 엔진입니다."><span className="setting-value ready-dot">agent-browser</span></SettingsRow>
             </SettingsGroup>
           </div>
+        )}
+
+        {props.activeSection === 'auto-login' && (
+          <CredentialSettings
+            credentials={props.credentials}
+            status={props.credentialStatus}
+            onAutofill={props.onAutofillCredential}
+            onRemove={props.onRemoveCredential}
+            onSave={props.onSaveCredential}
+          />
         )}
 
         {props.activeSection === 'providers' && (
@@ -1051,11 +1377,19 @@ function McpRow(props: { name: string; command: string; status: string; checked:
   return <div className="mcp-row"><span className="mcp-icon"><PlugConnected24Regular /></span><span className="mcp-copy"><strong>{props.name}</strong><small>{props.command}</small></span><span className={props.status === 'Connected' ? 'mcp-status ready' : 'mcp-status'}>{props.status}</span><Toggle checked={props.checked} onChange={props.onChange} /></div>;
 }
 
+function AgentPermissionSelect(props: { value: AgentPermissionMode; onChange(value: AgentPermissionMode): void }): ReactElement {
+  return <label className={`permission-select permission-${props.value}`}><select value={props.value} onChange={(event) => props.onChange(event.target.value as AgentPermissionMode)}><option value="read-only">Read only</option><option value="guard">Guard</option><option value="full-access">Full access</option></select><ChevronDown24Regular /></label>;
+}
+
+function PermissionSelect(props: { value: AppSettings['browserPermissions']['upload']; onChange(value: AppSettings['browserPermissions']['upload']): void }): ReactElement {
+  return <label className="permission-select"><select value={props.value} onChange={(event) => props.onChange(event.target.value as AppSettings['browserPermissions']['upload'])}><option value="allow">Allow</option><option value="ask">Ask</option><option value="deny">Deny</option></select><ChevronDown24Regular /></label>;
+}
+
 function Toggle(props: { checked: boolean; onChange(value: boolean): void }): ReactElement {
   return <label className="toggle"><input type="checkbox" aria-label="사용 여부 전환" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /><span /></label>;
 }
 
-function MessageBubble({ message }: { message: ChatMessage }): ReactElement {
+function MessageBubble({ message, onOpenLink }: { message: ChatMessage; onOpenLink?(url: string): void }): ReactElement {
   if (message.overview) return <AgentOverview overview={message.overview} />;
   return (
     <article className={`message message-${message.role}`}>
@@ -1065,7 +1399,16 @@ function MessageBubble({ message }: { message: ChatMessage }): ReactElement {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              a: ({ children, ...anchorProps }) => <a {...anchorProps} target="_blank" rel="noreferrer">{children}</a>,
+              a: ({ children, href, ...anchorProps }) => <a
+                {...anchorProps}
+                href={href}
+                target={onOpenLink ? undefined : '_blank'}
+                rel="noreferrer"
+                onClick={onOpenLink && href ? (event) => {
+                  event.preventDefault();
+                  onOpenLink(href);
+                } : undefined}
+              >{children}</a>,
             }}
           >
             {message.content}
@@ -1078,7 +1421,7 @@ function MessageBubble({ message }: { message: ChatMessage }): ReactElement {
 }
 
 function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overview']> }): ReactElement {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(overview.status === 'running');
   const statusLabel = overview.status === 'running'
     ? 'Running'
     : overview.status === 'completed'
@@ -1107,6 +1450,16 @@ function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overvi
             );
           })}
         </div>
+        {overview.activities?.length ? <div className="overview-live-activity" aria-label="실시간 브라우저 활동">
+          <span className="overview-live-title"><span className={overview.status === 'running' ? 'live-browser-status active' : 'live-browser-status'} />Live activity</span>
+          {overview.activities.slice(-6).map((activity) => (
+            <div className={`overview-live-row ${activity.phase}`} key={activity.id}>
+              <span className="step-icon">{activity.phase === 'completed' ? <CheckmarkCircle24Regular /> : activity.phase === 'failed' ? <Dismiss24Regular /> : <Circle24Regular />}</span>
+              <span><strong>{activity.name}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
+              <b>{activity.phase === 'started' ? '실행 중' : activity.phase === 'completed' ? '완료' : activity.phase}</b>
+            </div>
+          ))}
+        </div> : null}
         {overview.route.browserVisible && <div className="overview-browser-note"><Window24Regular /><span><strong>브라우저 작업 캡처</strong><small>{overview.route.targetHost || '검색 탭'} · 동작과 화면 전환 시 오른쪽에 기록</small></span></div>}
         {overview.route.blockedReason && <div className="overview-blocked"><ShieldLock24Regular />{overview.route.blockedReason}</div>}
       </div>}
@@ -1119,7 +1472,7 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
   const modeHint: Record<AgentMode, string> = {
     auto: 'Agent가 필요한 도구를 자동 선택',
     chat: '브라우저 없이 대화',
-    search: '실시간 브라우저 · 읽기 전용',
+    search: '백그라운드 웹 검색 · 읽기 전용',
     page: '현재 페이지 읽기',
     'browser-agent': '브라우저 조작 · Memory 저장',
   };
@@ -1138,19 +1491,27 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
       <div className="composer-tools">
         <div className="composer-context-tools">
           <button type="button" className="icon-button compact" aria-label="파일 첨부"><Attach24Regular /></button>
+          {props.skills?.length && props.onChangeSelectedSkill ? <label className="skill-run-select"><PuzzlePiece24Regular /><span className="sr-only">실행 Skill 선택</span><select value={props.selectedSkillId ?? ''} onChange={(event) => props.onChangeSelectedSkill?.(event.target.value)}><option value="">Auto skill</option>{props.skills.map((skill) => <option key={skill.id} value={skill.id}>{skill.name}</option>)}</select><ChevronDown24Regular /></label> : null}
           <span className="mode-boundary-hint">{modeHint[props.mode]}</span>
           <span className="context-chip"><Document24Regular />Local<ChevronDown24Regular /></span>
-          <span className="context-chip"><ShieldLock24Regular />Guard<ChevronDown24Regular /></span>
         </div>
         <div className="composer-options">
+          <label className={`permission-mode-select permission-${props.permissionMode}`}><ShieldLock24Regular /><span className="sr-only">Agent 권한</span><select value={props.permissionMode} onChange={(event) => props.onChangePermissionMode(event.target.value as AgentPermissionMode)}><option value="read-only">Read only</option><option value="guard">Guard</option><option value="full-access">Full access</option></select><ChevronDown24Regular /></label>
           <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
-          <label className="compact-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
+          <label className="compact-select model-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
           <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
           {props.busy && <button type="button" className="send-button stop-button" onClick={props.onCancel} aria-label="실행 중지"><Dismiss24Regular /></button>}
         </div>
       </div>
     </form>
   );
+}
+
+function credentialAutofillMessage(state: 'not-found' | 'origin-mismatch' | 'no-password-field' | 'unavailable'): string {
+  if (state === 'origin-mismatch') return '저장된 사이트와 현재 탭의 origin이 일치하지 않습니다.';
+  if (state === 'no-password-field') return '현재 페이지에서 로그인 입력란을 찾지 못했습니다.';
+  if (state === 'not-found') return '저장된 로그인을 찾지 못했습니다.';
+  return '보안 저장소 또는 현재 탭을 사용할 수 없습니다.';
 }
 
 function errorMessage(error: unknown): ChatMessage {
@@ -1175,9 +1536,35 @@ function applyRunEvent(
       return { ...message, meta: runEventLabel(event) };
     }
     if (overviewId && message.id === overviewId && message.overview) {
+      if (event.type === 'run-started') {
+        return { ...message, overview: { ...message.overview, sessionId: event.sessionId, activity: runEventLabel(event) } };
+      }
+      if (event.type === 'browser-tab-attached') {
+        return { ...message, overview: { ...message.overview, browserTabId: event.tab.id, activity: runEventLabel(event) } };
+      }
       if (event.type === 'browser-snapshot') {
         const snapshots = [...(message.overview.snapshots ?? []), event.snapshot].slice(-8);
         return { ...message, overview: { ...message.overview, snapshots, activity: event.snapshot.reason } };
+      }
+      if (event.type === 'activity') {
+        return {
+          ...message,
+          overview: {
+            ...message.overview,
+            activity: runEventLabel(event),
+            activities: updateRunActivities(message.overview.activities ?? [], event),
+          },
+        };
+      }
+      if (event.type === 'run-finished') {
+        return {
+          ...message,
+          overview: {
+            ...message.overview,
+            status: event.state,
+            activity: runEventLabel(event),
+          },
+        };
       }
       return { ...message, overview: { ...message.overview, activity: runEventLabel(event) } };
     }
@@ -1185,16 +1572,43 @@ function applyRunEvent(
   });
 }
 
+function updateRunActivities(
+  activities: NonNullable<NonNullable<ChatMessage['overview']>['activities']>,
+  event: Extract<AgentRunEvent, { type: 'activity' }>,
+): NonNullable<NonNullable<ChatMessage['overview']>['activities']> {
+  const next = [...activities];
+  if (event.phase === 'started') {
+    next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail });
+    return next.slice(-12);
+  }
+  const index = next.findLastIndex((activity) => activity.name === event.name && ['started', 'updated'].includes(activity.phase));
+  const existing = index >= 0 ? next[index] : undefined;
+  if (existing) next[index] = { ...existing, phase: event.phase, detail: event.detail || existing.detail };
+  else next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail });
+  return next.slice(-12);
+}
+
 function runEventLabel(event: AgentRunEvent): string {
   switch (event.type) {
     case 'run-started': return '실행을 시작했습니다';
     case 'skills-routed': return event.route.reason;
+    case 'browser-tab-attached': return 'Agent 브라우저 탭을 연결했습니다';
     case 'provider-started': return `${event.providerId === 'codex' ? 'Codex' : 'Claude Code'} · ${event.model}`;
     case 'text': return '응답 스트리밍 중';
     case 'activity': return `${event.name} · ${event.phase}`;
+    case 'approval-required': return `${event.action} · 승인 필요`;
+    case 'approval-resolved': return `승인 · ${event.decision}`;
     case 'browser-snapshot': return `${event.snapshot.title} · 화면 캡처`;
     case 'run-finished': return runStateLabel(event.state);
   }
+}
+
+function agentStatusLabel(status: BrowserTabState['agentStatus']): string {
+  if (status === 'running') return '실행 중';
+  if (status === 'completed') return '완료';
+  if (status === 'cancelled') return '중지됨';
+  if (status === 'failed') return '실패';
+  return 'Agent';
 }
 
 function runStateLabel(state: 'completed' | 'failed' | 'cancelled'): string {

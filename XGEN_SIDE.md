@@ -23,9 +23,22 @@ The first bootstrap milestone includes:
 - an `agent-browser` MCP bridge attached to the active Electron instance over loopback CDP
 - Claude subscription authentication through the official Claude Code CLI
 - a local Skill Router that selects capabilities before exposing provider tools
+- an optional general-chat Skill selector that pins one enabled Skill for the request
 - an in-chat Browser task overview for routed Skills, execution steps, and policy scope
+- run-owned Agent browser tabs that show the live page while the browser side panel reuses the general-chat run progress
+- global Agent upload/download permissions with fail-closed, user-owned approval handoff
 
 Claude runs only through the official CLI installed and authenticated by the local user. XGEN Side launches `claude auth login`, checks `claude auth status`, and invokes `claude -p` without reading or copying subscription credentials. XGEN Side must not become a hosted OAuth broker or route one user's subscription credentials on behalf of other users; a hosted or shared service requires an API or an Anthropic-approved commercial arrangement.
+
+## Run permissions and private auto login
+
+Each composer exposes a run-scoped permission ceiling:
+
+- `Read only` allows navigation and inspection but denies page interaction and data changes.
+- `Guard` allows navigation and asks through the trusted XGEN approval broker before each selected mutating browser action.
+- `Full access` allows the capabilities declared by the selected Skill without intermediate prompts. It does not enable unselected tools or privileged actions such as eval, raw network access, or browser state export. Global upload and download deny/ask settings still take precedence.
+
+Optional Auto login credentials are stored in a separate OS-encrypted local vault. The renderer can list only non-secret metadata; decrypted usernames and passwords remain in the Electron main process and are inserted directly into an exact-origin user tab. An autofilled tab is protected for its lifetime and browser-agent automation is blocked while any protected tab is open.
 
 ## Commands
 
