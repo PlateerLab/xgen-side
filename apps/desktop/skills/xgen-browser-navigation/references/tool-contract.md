@@ -2,6 +2,8 @@
 
 ## Preferred sequence
 
+Do not pass `session`, `namespace`, `extraArgs`, `allowedDomains`, or any CDP connection option. XGEN Side binds every tool call to its authenticated run-owned tab.
+
 1. `agent_browser_tab_list`
 2. `agent_browser_tab_switch` when the target is not active
 3. `agent_browser_open` when navigation is required

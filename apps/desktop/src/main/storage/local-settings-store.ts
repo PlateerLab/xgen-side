@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { app } from 'electron';
+import { dirname } from 'node:path';
 import type { AppSettings } from '../../shared/contracts';
+import type { CoreBlobStore } from './core-blob-store';
 
 const defaults: AppSettings = {
   schemaVersion: 1,
@@ -14,14 +14,20 @@ const defaults: AppSettings = {
 export class LocalSettingsStore {
   private readonly path: string;
 
-  constructor(path = join(app.getPath('userData'), 'agent-data', 'settings.json')) {
+  constructor(
+    path: string,
+    private readonly blobs?: CoreBlobStore,
+  ) {
     this.path = path;
   }
 
   async load(): Promise<AppSettings> {
     try {
-      const saved = JSON.parse(await readFile(this.path, 'utf8')) as unknown;
-      return sanitizeSettings(saved);
+      const coreValue = await this.blobs?.readLocalData('settings');
+      const legacyValue = coreValue === undefined ? await readFile(this.path, 'utf8') : undefined;
+      const safe = sanitizeSettings(JSON.parse(coreValue ?? legacyValue ?? ''));
+      if (this.blobs && coreValue === undefined) await this.blobs.writeLocalData('settings', JSON.stringify(safe));
+      return safe;
     } catch {
       return structuredClone(defaults);
     }
@@ -29,6 +35,10 @@ export class LocalSettingsStore {
 
   async save(settings: AppSettings): Promise<AppSettings> {
     const safe = sanitizeSettings(settings);
+    if (this.blobs) {
+      await this.blobs.writeLocalData('settings', JSON.stringify(safe));
+      return safe;
+    }
     await mkdir(dirname(this.path), { recursive: true });
     const temporaryPath = `${this.path}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(safe, null, 2), 'utf8');

@@ -3,4 +3,6 @@ packages:
   - 'apps/*'
 minimumReleaseAge: 2880
 allowBuilds:
+  electron: true
+  electron-winstaller: true
   esbuild: true

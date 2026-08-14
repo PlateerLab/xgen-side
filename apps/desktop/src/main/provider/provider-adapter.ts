@@ -8,6 +8,7 @@ export interface LocatedExecutable {
 
 export interface BrowserBridge {
   executablePath: string;
+  args: string[];
   environment: Record<string, string>;
   toolProfiles: string[];
   tabId: string;

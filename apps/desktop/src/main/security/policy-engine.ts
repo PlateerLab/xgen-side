@@ -15,6 +15,7 @@ const deniedPatterns: ReadonlyArray<RegExp> = [
   /\brd\b[^\r\n]*\/s\b/i,
   /\bdel\b[^\r\n]*\/s\b/i,
   /\breg(?:\.exe)?\s+delete\b/i,
+  /(?:^|\s)rm\s+[^\r\n]*(?:-rf|-fr|--recursive[^\r\n]*--force|--force[^\r\n]*--recursive)(?:\s|$)/i,
 ];
 
 const approvalPatterns: ReadonlyArray<RegExp> = [
@@ -25,6 +26,7 @@ const approvalPatterns: ReadonlyArray<RegExp> = [
   /(?:^|\s)(?:>|>>)(?:\s|$)/,
   /\binvoke-webrequest\b/i,
   /\bcurl(?:\.exe)?\b/i,
+  /(?:^|\s)(?:cp|mv|mkdir|touch|chmod|chown|rm)(?:\s|$)/i,
 ];
 
 const allowedPatterns: ReadonlyArray<RegExp> = [

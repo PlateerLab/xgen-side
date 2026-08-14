@@ -9,11 +9,13 @@ export interface CredentialAutofillTarget {
 }
 
 export type CredentialAutofillTargetResolver = (tabId: string) => CredentialAutofillTarget | undefined;
+export type AgentCredentialAutofillTargetResolver = (tabId: string, runId: string) => CredentialAutofillTarget | undefined;
 
 export class CredentialAutofillService {
   constructor(
     private readonly vault: CredentialVault,
     private readonly resolveTarget: CredentialAutofillTargetResolver,
+    private readonly resolveAgentTarget: AgentCredentialAutofillTargetResolver = () => undefined,
   ) {}
 
   async fill(credentialId: string, tabId: string): Promise<CredentialAutofillResult> {
@@ -33,7 +35,36 @@ export class CredentialAutofillService {
       const result = await this.vault.useForExactOrigin(
         credentialId,
         pageUrl,
-        (username, password, origin) => this.insertIntoPage(contents, origin, username, password),
+        (username, password, origin) => this.insertIntoPage(contents, origin, username, password, false),
+      );
+      if (result.state !== 'used') return { state: result.state };
+      return result.value;
+    } catch (error) {
+      if (error instanceof CredentialVaultUnavailableError) return { state: 'unavailable' };
+      throw error;
+    }
+  }
+
+  async fillForAgent(
+    runId: string,
+    tabId: string,
+    pageUrl: string,
+    itemRef?: string,
+  ): Promise<CredentialAutofillResult> {
+    validateBrowserTabId(tabId);
+    if (typeof runId !== 'string' || !/^[A-Za-z0-9._:-]{1,160}$/.test(runId)) throw new Error('Invalid Agent Run id.');
+    if (!this.vault.status().available) return { state: 'unavailable' };
+    const target = this.resolveAgentTarget(tabId, runId);
+    if (!target || target.contents.isDestroyed()) return { state: 'unavailable' };
+    const contents = target.contents;
+    if (!credentialOriginMatches(new URL(pageUrl).origin, contents.getURL())) return { state: 'origin-mismatch' };
+    target.protect();
+
+    try {
+      const result = await this.vault.useMatchingOrigin(
+        contents.getURL(),
+        itemRef,
+        (username, password, origin) => this.insertIntoPage(contents, origin, username, password, true),
       );
       if (result.state !== 'used') return { state: result.state };
       return result.value;
@@ -48,18 +79,19 @@ export class CredentialAutofillService {
     origin: string,
     username: string,
     password: string,
+    submit: boolean,
   ): Promise<CredentialAutofillResult> {
     if (!isCurrentExactOrigin(contents, origin)) return { state: 'origin-mismatch' };
 
     const preventNavigation = (event: { preventDefault(): void }): void => event.preventDefault();
     contents.on('will-navigate', preventNavigation);
     contents.on('will-redirect', preventNavigation);
+    let usernameFilled = false;
     try {
       const hasPassword = await focusCredentialField(contents, origin, 'password');
       if (!hasPassword || !isCurrentExactOrigin(contents, origin)) return { state: 'no-password-field' };
 
       const hasUsername = await focusCredentialField(contents, origin, 'username');
-      let usernameFilled = false;
       if (hasUsername && isCurrentExactOrigin(contents, origin)) {
         await contents.insertText(username);
         usernameFilled = true;
@@ -68,11 +100,18 @@ export class CredentialAutofillService {
       const passwordFocused = await focusCredentialField(contents, origin, 'password');
       if (!passwordFocused || !isCurrentExactOrigin(contents, origin)) return { state: 'no-password-field' };
       await contents.insertText(password);
-      return { state: 'filled', usernameFilled };
     } finally {
       contents.removeListener('will-navigate', preventNavigation);
       contents.removeListener('will-redirect', preventNavigation);
     }
+    const submitted = submit && await submitCredentialForm(contents, origin);
+    return { state: 'filled', usernameFilled, submitted };
+  }
+}
+
+function validateBrowserTabId(tabId: string): void {
+  if (typeof tabId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tabId)) {
+    throw new Error('Invalid browser tab id.');
   }
 }
 
@@ -86,6 +125,32 @@ async function focusCredentialField(
   kind: 'username' | 'password',
 ): Promise<boolean> {
   const script = buildFocusScript(expectedOrigin, kind);
+  try {
+    return await contents.executeJavaScript(script, true) === true;
+  } catch {
+    return false;
+  }
+}
+
+async function submitCredentialForm(contents: WebContents, expectedOrigin: string): Promise<boolean> {
+  if (!isCurrentExactOrigin(contents, expectedOrigin)) return false;
+  const script = `(() => {
+    if (location.origin !== ${JSON.stringify(expectedOrigin)}) return false;
+    const password = [...document.querySelectorAll('input[type="password"]')]
+      .find((input) => input instanceof HTMLInputElement && !input.disabled && !input.readOnly && input.value.length > 0);
+    if (!(password instanceof HTMLInputElement)) return false;
+    const form = password.form;
+    const submit = form?.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+    if (submit instanceof HTMLElement && !submit.hasAttribute('disabled')) {
+      submit.click();
+      return true;
+    }
+    if (form) {
+      form.requestSubmit();
+      return true;
+    }
+    return false;
+  })()`;
   try {
     return await contents.executeJavaScript(script, true) === true;
   } catch {

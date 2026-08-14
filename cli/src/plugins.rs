@@ -2,7 +2,8 @@
 //!
 //! Plugins run out-of-process and communicate over a small stdio JSON protocol.
 //! Core agent-browser keeps ownership of browser automation, policy checks, and
-//! redaction-sensitive flows; credential plugins only resolve secrets on demand.
+//! redaction-sensitive flows. Trusted credential injectors may fill a host
+//! browser without returning plaintext to the agent-browser process.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -14,6 +15,7 @@ use tokio::io::AsyncWriteExt;
 pub const PROTOCOL_VERSION: &str = "agent-browser.plugin.v1";
 pub const TYPE_PLUGIN_MANIFEST: &str = "plugin.manifest";
 pub const CAPABILITY_CREDENTIAL_READ: &str = "credential.read";
+pub const CAPABILITY_CREDENTIAL_INJECT: &str = "credential.inject";
 pub const CAPABILITY_BROWSER_PROVIDER: &str = "browser.provider";
 pub const CAPABILITY_LAUNCH_MUTATE: &str = "launch.mutate";
 pub const CAPABILITY_COMMAND_RUN: &str = "command.run";
@@ -55,6 +57,16 @@ pub struct ResolvedCredential {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct CredentialInjectionResult {
+    pub state: String,
+    #[serde(default)]
+    pub username_filled: bool,
+    #[serde(default)]
+    pub submitted: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BrowserProviderResult {
     #[serde(alias = "wsUrl", alias = "connectUrl", alias = "cdp_url")]
     pub cdp_url: String,
@@ -87,6 +99,15 @@ struct CredentialPluginResponse {
     success: bool,
     #[serde(default)]
     credential: Option<ResolvedCredential>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CredentialInjectionPluginResponse {
+    protocol: String,
+    success: bool,
+    #[serde(default)]
+    injection: Option<CredentialInjectionResult>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -312,6 +333,52 @@ pub async fn resolve_credential_with_plugins(
         ));
     }
     Ok(credential)
+}
+
+/// Requests host-side credential injection. The plugin response is deliberately
+/// state-only so usernames, passwords, OTPs, and passkey material never enter
+/// agent-browser memory or tool output.
+pub async fn inject_credential_with_plugins(
+    provider: &str,
+    plugins: &[PluginConfig],
+    request: CredentialResolveRequest<'_>,
+) -> Result<CredentialInjectionResult, String> {
+    let plugin = find_plugin(plugins, provider)
+        .ok_or_else(|| format!("Credential plugin '{}' is not configured", provider))?;
+    let response = invoke_plugin(
+        plugin,
+        "credential.inject",
+        CAPABILITY_CREDENTIAL_INJECT,
+        json!({
+            "profileName": request.profile_name,
+            "itemRef": request.item_ref,
+            "url": request.url,
+        }),
+        125,
+        false,
+    )
+    .await?;
+    let response: CredentialInjectionPluginResponse = serde_json::from_value(response)
+        .map_err(|_| format!("Credential plugin '{}' returned invalid JSON", provider))?;
+    if response.protocol != PROTOCOL_VERSION || !response.success {
+        return Err(format!(
+            "Credential plugin '{}' could not inject credentials",
+            provider
+        ));
+    }
+    let injection = response.injection.ok_or_else(|| {
+        format!(
+            "Credential plugin '{}' returned no injection result",
+            provider
+        )
+    })?;
+    if injection.state != "filled" {
+        return Err(format!(
+            "Credential plugin '{}' returned injection state '{}'",
+            provider, injection.state
+        ));
+    }
+    Ok(injection)
 }
 
 pub async fn connect_browser_provider_with_plugins(
@@ -893,6 +960,7 @@ fn is_core_plugin_entrypoint(entrypoint: &str) -> bool {
     matches!(
         entrypoint,
         CAPABILITY_CREDENTIAL_READ
+            | CAPABILITY_CREDENTIAL_INJECT
             | CAPABILITY_BROWSER_PROVIDER
             | CAPABILITY_LAUNCH_MUTATE
             | TYPE_PLUGIN_MANIFEST
@@ -1032,9 +1100,11 @@ mod tests {
     #[test]
     fn plugin_run_rejects_core_entrypoints() {
         assert!(is_core_plugin_entrypoint(CAPABILITY_CREDENTIAL_READ));
+        assert!(is_core_plugin_entrypoint(CAPABILITY_CREDENTIAL_INJECT));
         assert!(is_core_plugin_entrypoint(CAPABILITY_BROWSER_PROVIDER));
         assert!(is_core_plugin_entrypoint(CAPABILITY_LAUNCH_MUTATE));
         assert!(is_core_plugin_entrypoint("credential.resolve"));
+        assert!(is_core_plugin_entrypoint("credential.inject"));
         assert!(is_core_plugin_entrypoint("browser.launch"));
         assert!(is_core_plugin_entrypoint("browser.close"));
         assert!(is_core_plugin_entrypoint("launch.mutate"));
@@ -1178,6 +1248,48 @@ printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"credential":{
         assert_eq!(credential.username, "user");
         assert_eq!(credential.password, "pass");
         assert_eq!(credential.url.as_deref(), Some("https://example.com/login"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn inject_credential_returns_state_without_plaintext() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_path = dir.path().join("mock-credential-injector");
+        std::fs::write(
+            &plugin_path,
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s' '{"protocol":"agent-browser.plugin.v1","success":true,"injection":{"state":"filled","usernameFilled":true,"submitted":true}}'
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&plugin_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&plugin_path, perms).unwrap();
+
+        let plugins = vec![PluginConfig {
+            name: "trusted-host".to_string(),
+            command: plugin_path.to_string_lossy().to_string(),
+            capabilities: vec![CAPABILITY_CREDENTIAL_INJECT.to_string()],
+            ..PluginConfig::default()
+        }];
+        let result = inject_credential_with_plugins(
+            "trusted-host",
+            &plugins,
+            CredentialResolveRequest {
+                profile_name: "example",
+                item_ref: None,
+                url: Some("https://example.com/login"),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.state, "filled");
+        assert!(result.username_filled);
+        assert!(result.submitted);
     }
 
     #[cfg(unix)]

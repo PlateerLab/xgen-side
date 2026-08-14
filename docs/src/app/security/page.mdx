@@ -9,7 +9,7 @@ All security features are opt-in. By default, agent-browser imposes no restricti
 These features are designed to mitigate the following threats when an LLM-based agent drives a browser:
 
 - **Credential exposure** -- Passwords stored in the auth vault are never included in LLM context. The CLI handles vault operations locally; credentials do not pass through the daemon's IPC channel.
-- **Plugin secret access**: Credential provider plugins run out-of-process and only receive a structured credential resolution request. Core agent-browser keeps browser automation, policy checks, and redaction-sensitive output handling.
+- **Plugin secret access**: Legacy `credential.read` providers return a credential to agent-browser for one login. Trusted host applications should use `credential.inject`, which fills and submits locally and returns only non-secret state. Core agent-browser keeps policy checks and redaction-sensitive output handling.
 - **Prompt injection via page content** -- Malicious pages can embed text that looks like tool output or system instructions. Content boundary markers (`--content-boundaries`) let the orchestrator distinguish trusted tool output from untrusted page content.
 - **Unauthorized navigation / data exfiltration** — A compromised or manipulated agent could navigate to attacker-controlled domains to exfiltrate data. The domain allowlist (`--allowed-domains`) blocks navigations, sub-resource requests, WebSocket connections, EventSource streams, and `sendBeacon` calls to non-allowed domains. In supported Chromium sessions, it disables WebRTC peer connections so STUN, TURN, and related DNS traffic cannot bypass HTTP interception.
 - **Unauthorized destructive actions** -- Action policy (`--action-policy`) and confirmation gating (`--confirm-actions`) prevent the agent from performing dangerous operations (eval, downloads, uploads) without explicit approval.
@@ -252,7 +252,7 @@ Example policy (restrictive):
   </tbody>
 </table>
 
-Auth vault operations keep secrets out of normal command output and LLM context. Domain allowlist restrictions still apply to `auth login` navigations. Plugin-backed logins also expose the capability action `plugin:<name>:credential.read` for policy and confirmation gates.
+Auth vault operations keep secrets out of normal command output and LLM context. Domain allowlist restrictions still apply to `auth login` navigations. Plugin-backed logins expose `plugin:<name>:credential.read` or the state-only `plugin:<name>:credential.inject` action for policy and confirmation gates.
 
 ## Action Confirmation
 

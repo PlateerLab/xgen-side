@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { app, safeStorage } from 'electron';
+import { dirname } from 'node:path';
 import type { CredentialSaveRequest, CredentialSummary, CredentialVaultStatus } from '../../shared/contracts';
+import type { CoreBlobStore } from './core-blob-store';
 import {
   credentialOriginMatches,
   normalizeCredentialOrigin,
@@ -29,7 +29,7 @@ interface DecryptedCredentialEntry extends CredentialSummary {
   password: string;
 }
 
-interface SafeStorageAdapter {
+export interface SafeStorageAdapter {
   isEncryptionAvailable(): boolean;
   encryptString(plainText: string): Buffer;
   decryptString(encrypted: Buffer): string;
@@ -52,8 +52,9 @@ export class CredentialVault {
   private tail: Promise<void> = Promise.resolve();
 
   constructor(
-    private readonly path = join(app.getPath('userData'), 'agent-data', 'credentials.vault'),
-    private readonly storage: SafeStorageAdapter = safeStorage,
+    private readonly path: string,
+    private readonly storage: SafeStorageAdapter,
+    private readonly blobs?: CoreBlobStore,
   ) {}
 
   status(): CredentialVaultStatus {
@@ -150,6 +151,29 @@ export class CredentialVault {
     });
   }
 
+  useMatchingOrigin<T>(
+    pageUrl: string,
+    itemRef: string | undefined,
+    consumer: (username: string, password: string, origin: string) => Promise<T>,
+  ): Promise<CredentialUseResult<T>> {
+    return this.serialized(async () => {
+      this.assertAvailable();
+      const document = await this.readDocument();
+      const candidates = document.entries.map((entry) => this.decryptEntry(entry));
+      const validItemRef = itemRef && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(itemRef);
+      if (itemRef && !validItemRef) return { state: 'not-found' };
+      const requested = validItemRef
+        ? candidates.find((entry) => entry.id === itemRef)
+        : undefined;
+      if (itemRef && !requested) return { state: 'not-found' };
+      const credential = requested ?? candidates.find((entry) => credentialOriginMatches(entry.origin, pageUrl));
+      if (!credential) return { state: 'not-found' };
+      if (!credentialOriginMatches(credential.origin, pageUrl)) return { state: 'origin-mismatch' };
+      const value = await consumer(credential.username, credential.password, credential.origin);
+      return { state: 'used', value };
+    });
+  }
+
   private assertAvailable(): void {
     const status = this.status();
     if (!status.available) throw new CredentialVaultUnavailableError(status.reason);
@@ -194,8 +218,11 @@ export class CredentialVault {
 
   private async readDocument(): Promise<CredentialVaultDocument> {
     let input: string;
+    let loadedFromCore = false;
     try {
-      input = await readFile(this.path, 'utf8');
+      const coreValue = await this.blobs?.readLocalData('credentials');
+      loadedFromCore = coreValue !== undefined;
+      input = coreValue ?? await readFile(this.path, 'utf8');
     } catch (error) {
       if (isNodeError(error) && error.code === 'ENOENT') return { schemaVersion: 1, entries: [] };
       throw error;
@@ -221,10 +248,18 @@ export class CredentialVault {
       ids.add(id);
       return { id, ciphertext: value.ciphertext };
     });
-    return { schemaVersion: 1, entries };
+    const document = { schemaVersion: 1 as const, entries };
+    if (this.blobs && !loadedFromCore) {
+      await this.blobs.writeLocalData('credentials', JSON.stringify(document));
+    }
+    return document;
   }
 
   private async writeDocument(document: CredentialVaultDocument): Promise<void> {
+    if (this.blobs) {
+      await this.blobs.writeLocalData('credentials', JSON.stringify(document));
+      return;
+    }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.path}.${process.pid}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(document), { encoding: 'utf8', mode: 0o600 });

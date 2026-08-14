@@ -22,7 +22,7 @@ Keep browser automation itself in agent-browser. A plugin should provide data or
 These are good places for plugin authors to start:
 
 - **New cloud browser providers**: Hosted browser platforms are good models for `browser.provider`. Existing built-ins can stay in core for compatibility, but new providers should usually start as plugins.
-- **Vault integrations**: Password managers, secret stores, and enterprise SSO helpers fit `credential.read`. Keep the local encrypted auth vault in core, but put vendor-specific vault access in plugins.
+- **Vault integrations**: Password managers, secret stores, and enterprise SSO helpers fit `credential.read`. A trusted browser host that must keep plaintext out of agent-browser should instead implement `credential.inject` and return only fill and submit state.
 - **Stealth and anti-detection**: These techniques change quickly and can be risky to support in core. They fit `launch.mutate` plugins that append launch args, extensions, init scripts, or user-agent overrides.
 - **CAPTCHA solvers**: CAPTCHA integrations are plugin territory because they involve third-party APIs, credentials, policy concerns, and fast vendor churn. They can use `command.run` or a custom capability such as `captcha.solve`.
 - **Vendor-specific auth helpers**: Login helpers for a specific app, IdP, or enterprise flow should live outside core unless they become generic browser automation primitives.
@@ -136,6 +136,8 @@ Only stdout is parsed. Write no logs to stdout. agent-browser suppresses plugin 
 
 Core integrations suppress plugin-provided error text in user-facing errors to reduce accidental secret exposure. Generic `plugin run` keeps plugin error text because it is a developer-facing command.
 
+For `credential.inject`, use request type `credential.inject` and return an `injection` object such as `{ "state": "filled", "usernameFilled": true, "submitted": true }`. Never include username, password, OTP, passkey material, or cookie values in this response.
+
 ## Plugin manifest
 
 Support `plugin.manifest` so users can add your plugin without manually entering capabilities:
@@ -179,13 +181,14 @@ Without a manifest, users must pass `--capability` flags during add.
   </thead>
   <tbody>
     <tr><td><code>credential.read</code></td><td><code>credential.resolve</code></td><td><code>auth login --credential-provider &lt;name&gt;</code></td><td><code>credential</code></td></tr>
+    <tr><td><code>credential.inject</code></td><td><code>credential.inject</code></td><td><code>auth login --credential-provider &lt;name&gt;</code></td><td><code>injection</code></td></tr>
     <tr><td><code>browser.provider</code></td><td><code>browser.launch</code>, <code>browser.close</code></td><td><code>--provider &lt;name&gt;</code></td><td><code>browser</code></td></tr>
     <tr><td><code>launch.mutate</code></td><td><code>launch.mutate</code></td><td>Any local launch</td><td><code>launch</code></td></tr>
     <tr><td><code>command.run</code></td><td>Custom request type</td><td><code>plugin run &lt;name&gt; &lt;type&gt;</code></td><td><code>data</code></td></tr>
   </tbody>
 </table>
 
-Plugins may declare custom capabilities such as `captcha.solve`. `plugin run` can invoke `command.run` and custom capabilities, but it cannot invoke core capabilities or protocol request types directly. Use the dedicated command path for `credential.read`, `browser.provider`, and `launch.mutate`.
+Plugins may declare custom capabilities such as `captcha.solve`. `plugin run` can invoke `command.run` and custom capabilities, but it cannot invoke core capabilities or protocol request types directly. Use the dedicated command path for `credential.read`, `credential.inject`, `browser.provider`, and `launch.mutate`.
 
 ## Minimal plugin
 

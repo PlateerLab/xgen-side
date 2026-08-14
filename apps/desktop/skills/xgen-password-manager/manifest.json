@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.password-manager",
+  "settingKey": "global:password-manager",
+  "category": "Safety",
+  "domain": "OS-encrypted local credential vault",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "guard",
+    "modes": ["browser-agent"],
+    "intents": ["saved-login", "password-manager", "credential-autofill"],
+    "signals": ["saved login", "saved password", "password manager", "credential vault", "autofill", "저장된 로그인", "저장된 비밀번호", "비밀번호 관리자", "자동 입력"]
+  },
+  "runtime": {
+    "kind": "agent-browser",
+    "capability": "opaque-credential-autofill",
+    "adapter": "agent-browser",
+    "server": "xgen_browser",
+    "toolProfiles": ["core", "tabs", "state"],
+    "tools": ["agent_browser_tab_list", "agent_browser_snapshot", "agent_browser_get_url", "agent_browser_wait_for_load", "agent_browser_auth_login"]
+  },
+  "permissions": {
+    "risk": "consequential",
+    "allowActions": ["snapshot", "wait", "read", "get"],
+    "confirmActions": ["interact"],
+    "denyActions": ["fill", "eval", "upload", "download", "network", "state", "credential-disclosure", "secret-logging"]
+  },
+  "presentation": {
+    "browserVisible": true
+  },
+  "progress": {
+    "label": "Password Manager",
+    "detail": "Fills an origin-matched saved login without exposing the password to AI"
+  }
+}

@@ -312,7 +312,9 @@ agent-browser plugin run <name> <type> --payload <json>
                                           # Run an arbitrary plugin request
 ```
 
-Credential provider plugins run out-of-process over the `agent-browser.plugin.v1` stdio JSON protocol and must declare `credential.read`. Use `--confirm-actions plugin:<name>:credential.read` to require explicit approval before a plugin resolves secrets.
+Credential provider plugins run out-of-process over the `agent-browser.plugin.v1` stdio JSON protocol. `credential.read` returns credentials to agent-browser for legacy vault integrations. Prefer `credential.inject` for trusted host applications that fill and submit locally and return state only. Use `--confirm-actions plugin:<name>:credential.read` or `--confirm-actions plugin:<name>:credential.inject` to require explicit approval.
+
+The MCP `agent_browser_auth_login` tool mirrors the login flags with `credentialProvider`, `item`, `url`, `usernameSelector`, `passwordSelector`, and `submitSelector` fields.
 
 Other capabilities use the same protocol:
 - `browser.provider`: `agent-browser --provider <name> open <url>`

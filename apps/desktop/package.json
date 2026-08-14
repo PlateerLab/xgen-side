@@ -1,33 +1,100 @@
 {
   "name": "@xgen/side-desktop",
   "version": "0.1.0",
+  "author": "XGEN",
   "private": true,
-  "description": "Windows-first AI browser shell for XGEN Side",
+  "productName": "XGEN Side",
+  "description": "Cross-platform macOS and Windows AI browser shell for XGEN Side",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "package:dir": "node ../../scripts/verify-xgen-package.mjs && electron-builder --dir",
+    "package:mac": "node ../../scripts/verify-xgen-package.mjs && electron-builder --mac zip",
+    "package:win": "node ../../scripts/verify-xgen-package.mjs && electron-builder --win nsis --x64",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/main/browser-cdp.test.ts src/main/security/policy-engine.test.ts src/main/security/credential-policy.test.ts src/main/command/command-broker.test.ts src/main/provider/provider-adapter.test.ts src/main/provider/browser-action-policy.test.ts src/main/provider/provider-runtime.test.ts src/main/skills/skill-router.test.ts src/renderer/src/agent-run-link.test.ts"
+    "test": "tsx --test src/main/browser-address.test.ts src/main/browser-cdp.test.ts src/main/core/xgen-mcp-bridge.test.ts src/main/platform/platform-runtime.test.ts src/main/platform/platform-webauthn.test.ts src/main/security/browser-cdp-gateway.test.ts src/main/security/policy-engine.test.ts src/main/security/credential-policy.test.ts src/main/security/credential-broker.test.ts src/main/command/command-broker.test.ts src/main/provider/provider-adapter.test.ts src/main/provider/browser-action-policy.test.ts src/main/provider/provider-runtime.test.ts src/main/skills/skill-router.test.ts src/main/storage/core-local-storage.test.ts src/main/storage/local-run-store.test.ts src/main/storage/local-workspace-store.test.ts src/renderer/src/activity-label.test.ts src/renderer/src/agent-run-link.test.ts src/renderer/src/browser-auth-handoff.test.ts src/renderer/src/new-tab-intent.test.ts src/renderer/src/persisted-chat.test.ts src/renderer/src/platform-auth.test.ts src/renderer/src/session-labels.test.ts"
   },
   "dependencies": {
     "@fluentui/react-icons": "^2.0.334",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.5",
     "electron": "^43.3.0",
+    "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "tsx": "^4.23.6",
     "typescript": "^7.0.2",
     "vite": "8.1.5"
+  },
+  "build": {
+    "appId": "com.xgen.side",
+    "productName": "XGEN Side",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "skills/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "xgen"
+      },
+      {
+        "from": "../../bin",
+        "to": "engine",
+        "filter": [
+          "agent-browser-*"
+        ]
+      },
+      {
+        "from": "../../bin",
+        "to": "core",
+        "filter": [
+          "xgen-daemon-*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "target": [
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

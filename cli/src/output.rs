@@ -3442,12 +3442,13 @@ capabilities. Use --capability when adding older plugins without a manifest.
 
 Capabilities:
   credential.read          Resolve credentials for auth login
+  credential.inject        Ask a trusted host to fill and submit without returning secrets
   browser.provider         Launch/connect an external browser provider
   launch.mutate            Append local launch args, extensions, or init scripts
   command.run              Accept arbitrary namespaced plugin requests
 
 Core capabilities and protocol request types use dedicated command paths.
-Use auth login for credential.read, --provider for browser.provider, and
+Use auth login for credential.read or credential.inject, --provider for browser.provider, and
 a local launch for launch.mutate.
 
 Example config:

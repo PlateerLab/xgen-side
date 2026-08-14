@@ -157,7 +157,7 @@ function resolveSkillRoot(): string {
 }
 
 function displayName(name: string): string {
-  return name.replace(/^xgen-/, '').split('-').map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' ');
+  return name.replace(/^xgen-/, '').split('-').map((word) => ['docx', 'xlsx', 'pptx', 'pdf'].includes(word) ? word.toUpperCase() : word[0]?.toUpperCase() + word.slice(1)).join(' ');
 }
 
 function unquote(value: string): string {
@@ -186,6 +186,7 @@ const agentBrowserTools = new Set([
   'agent_browser_tab_switch', 'agent_browser_tab_close', 'agent_browser_window_new',
   'agent_browser_frame_switch', 'agent_browser_frame_main', 'agent_browser_dialog_status',
   'agent_browser_dialog_accept', 'agent_browser_dialog_dismiss',
+  'agent_browser_auth_login',
 ]);
 
 function assertUnique(values: string[], label: string): void {

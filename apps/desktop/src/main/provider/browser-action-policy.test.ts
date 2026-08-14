@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { browserActionPolicy, browserPolicyActions } from './browser-action-policy';
+import { allowConfirmedAction, browserActionPolicy, browserPolicyActions, confirmAllowedAction } from './browser-action-policy';
 
 test('maps selected MCP tools to exact agent-browser policy actions', () => {
   assert.deepEqual(browserPolicyActions([
@@ -15,6 +15,10 @@ test('does not authorize interaction actions for navigation-only skills', () => 
   const actions = browserPolicyActions(['agent_browser_snapshot', 'agent_browser_get_url']);
   assert.equal(actions.includes('click'), false);
   assert.equal(actions.includes('fill'), false);
+});
+
+test('maps secure auth login to a dedicated policy action', () => {
+  assert.deepEqual(browserPolicyActions(['agent_browser_auth_login']), ['launch', 'auth_login']);
 });
 
 
@@ -74,4 +78,20 @@ test('hard and global denies take precedence over confirmations', () => {
   const guard = browserActionPolicy(['agent_browser_download'], { upload: 'ask', download: 'deny' }, 'guard');
   assert.equal(guard.deny.includes('download'), true);
   assert.equal(guard.confirm.includes('download'), false);
+});
+
+test('supports a trusted workflow moving one action across the approval boundary', () => {
+  const policy = browserActionPolicy(
+    ['agent_browser_click', 'agent_browser_auth_login'],
+    { upload: 'ask', download: 'ask' },
+    'guard',
+  );
+  allowConfirmedAction(policy, 'click');
+  confirmAllowedAction(policy, 'auth_login');
+  assert.equal(policy.allow.includes('click'), true);
+  assert.equal(policy.confirm.includes('click'), false);
+  assert.equal(policy.allow.includes('auth_login'), false);
+  assert.equal(policy.confirm.includes('auth_login'), true);
+  assert.equal(policy.allow.includes('confirm'), true);
+  assert.equal(policy.allow.includes('deny'), true);
 });

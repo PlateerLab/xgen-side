@@ -1,4 +1,4 @@
-export type ShellKind = 'powershell' | 'cmd' | 'wsl';
+export type ShellKind = 'powershell' | 'cmd' | 'wsl' | 'zsh';
 
 export type BrowserTabOwner = 'user' | 'agent';
 export type BrowserAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
@@ -68,6 +68,23 @@ export type AgentRunSource = 'chat' | 'browser-side';
 export type BrowserTargetPreference = 'new-agent-tab' | 'current-tab';
 export type AgentPermissionMode = 'read-only' | 'guard' | 'full-access';
 export type BrowserActionCategory = 'navigate' | 'click' | 'fill' | 'eval' | 'download' | 'upload' | 'snapshot' | 'scroll' | 'wait' | 'read' | 'get' | 'interact' | 'network' | 'state';
+export type LocalFileKind = 'docx' | 'xlsx' | 'pptx' | 'pdf';
+
+export interface LocalAttachment {
+  id: string;
+  name: string;
+  kind: LocalFileKind;
+  size: number;
+}
+
+export interface LocalArtifact {
+  id: string;
+  sessionId: string;
+  name: string;
+  kind: LocalFileKind;
+  relativePath: string;
+  size: number;
+}
 
 export type SkillRuntimeKind = 'llm' | 'provider-web' | 'page-context' | 'agent-browser' | 'policy';
 
@@ -123,7 +140,7 @@ export interface SkillRouteStep {
   id: string;
   label: string;
   detail: string;
-  kind: 'route' | 'research' | 'page' | 'browser' | 'interaction' | 'extract' | 'guard' | 'result';
+  kind: 'route' | 'research' | 'page' | 'browser' | 'interaction' | 'extract' | 'guard' | 'auth' | 'result';
 }
 
 export interface SkillRoute {
@@ -177,6 +194,7 @@ export interface AgentRunRequest {
   sourceSurface?: AgentRunSource;
   browserTarget?: BrowserTargetPreference;
   permissionMode?: AgentPermissionMode;
+  attachments?: LocalAttachment[];
 }
 
 export interface AgentRunResult {
@@ -188,6 +206,7 @@ export interface AgentRunResult {
   logDirectory: string;
   route?: SkillRoute;
   browserTabId?: string;
+  artifacts?: LocalArtifact[];
 }
 
 export interface BrowserSnapshot {
@@ -234,6 +253,56 @@ export interface LocalMarkdownFile {
   size: number;
 }
 
+export interface PersistedChatSession {
+  id: string;
+  title: string;
+  time: string;
+}
+
+export interface PersistedChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  meta?: string;
+  overview?: PersistedRunOverview;
+  attachments?: LocalAttachment[];
+  artifacts?: LocalArtifact[];
+}
+
+export interface PersistedRunActivity {
+  id: string;
+  name: string;
+  phase: 'started' | 'updated' | 'completed' | 'failed';
+  detail?: string;
+  startedAt?: string;
+  durationMs?: number;
+}
+
+export interface PersistedRunOverview {
+  sessionId?: string;
+  browserTabId?: string;
+  route: SkillRoute;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  prompt: string;
+  activity?: string;
+  startedAt?: string;
+  durationMs?: number;
+  authState?: 'preparing' | 'approval' | 'device' | 'qr-device' | 'verifying';
+  activities?: PersistedRunActivity[];
+  snapshots?: BrowserSnapshot[];
+}
+
+export interface PersistedWorkspaceState {
+  schemaVersion: 1;
+  activeChatId: string;
+  chats: PersistedChatSession[];
+  chatMessages: Record<string, PersistedChatMessage[]>;
+  browser: {
+    urls: string[];
+    activeIndex: number;
+  };
+}
+
 export interface AppSettings {
   schemaVersion: 1;
   general: {
@@ -272,7 +341,7 @@ export interface CredentialSaveRequest {
 }
 
 export type CredentialAutofillResult =
-  | { state: 'filled'; usernameFilled: boolean }
+  | { state: 'filled'; usernameFilled: boolean; submitted: boolean }
   | { state: 'not-found' | 'origin-mismatch' | 'no-password-field' | 'unavailable' };
 
 export interface XgenSideApi {
@@ -300,6 +369,14 @@ export interface XgenSideApi {
     run(request: AgentRunRequest): Promise<AgentRunResult>;
     start(request: AgentRunRequest, listener?: (event: AgentRunEvent) => void): AgentRunHandle;
   };
+  files: {
+    pick(): Promise<LocalAttachment[]>;
+    discard(id: string): Promise<boolean>;
+  };
+  artifacts: {
+    open(sessionId: string, relativePath: string): Promise<string>;
+    reveal(sessionId: string, relativePath: string): Promise<boolean>;
+  };
   skills: {
     list(): Promise<SkillCatalogEntry[]>;
     route(request: AgentRunRequest): Promise<SkillRoute>;
@@ -310,6 +387,10 @@ export interface XgenSideApi {
     listMarkdown(): Promise<LocalMarkdownFile[]>;
     readMarkdown(relativePath: string): Promise<string>;
     writeMarkdown(relativePath: string, content: string): Promise<void>;
+  };
+  workspace: {
+    load(): Promise<PersistedWorkspaceState>;
+    saveChats(state: Pick<PersistedWorkspaceState, 'activeChatId' | 'chats' | 'chatMessages'>): Promise<void>;
   };
   settings: {
     load(): Promise<AppSettings>;

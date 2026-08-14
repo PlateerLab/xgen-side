@@ -216,6 +216,8 @@ agent-browser auth login my-app --credential-provider vault --item "My App"
 agent-browser auth login my-app --credential-provider vault --item "My App" --url https://app.example.com/login --username-selector "#email" --password-selector "#password"
 ```
 
+The MCP `agent_browser_auth_login` tool accepts the equivalent `credentialProvider`, `item`, `url`, `usernameSelector`, `passwordSelector`, and `submitSelector` fields. Keep plugin secret access behind the capability action `plugin:<name>:credential.read`. Prefer `credential.inject` when a trusted host can fill and submit directly; its state-only response prevents password plaintext from entering agent-browser or model context. A trusted host may allow ordinary login-page and passkey-control clicks while retaining approval specifically for saved-credential injection.
+
 Plugins can also provide browser providers, launch mutators such as stealth setup, and arbitrary namespaced commands:
 
 ```bash

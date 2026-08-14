@@ -369,7 +369,9 @@ Plugin login options:
 - `--password-selector <sel>`: selector override for this login
 - `--submit-selector <sel>`: selector override for this login
 
-Credential provider plugins run out-of-process over the `agent-browser.plugin.v1` stdio JSON protocol. They return credentials to the daemon for a single login and agent-browser does not save those credentials locally.
+Credential provider plugins run out-of-process over the `agent-browser.plugin.v1` stdio JSON protocol. Legacy `credential.read` providers return credentials to the daemon for one login. Trusted browser hosts should prefer `credential.inject`, which fills and submits inside the host and returns only non-secret state to agent-browser.
+
+The MCP <code>agent_browser_auth_login</code> tool accepts the matching <code>credentialProvider</code>, <code>item</code>, <code>url</code>, <code>usernameSelector</code>, <code>passwordSelector</code>, and <code>submitSelector</code> fields so the MCP and CLI login paths use the same parser and plugin contract. A trusted host can keep normal login-page and passkey-control clicks uninterrupted while requiring approval specifically for saved-credential resolution.
 
 Other plugin capabilities use the same protocol:
 

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.pdf",
+  "settingKey": "documents.pdf",
+  "category": "Documents",
+  "domain": "Local PDF",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["chat"],
+    "intents": ["analyze PDF", "revise PDF", "create PDF"],
+    "signals": ["pdf", "pdf document", "pdf 분석", "pdf 수정"]
+  },
+  "runtime": {
+    "kind": "llm",
+    "capability": "local-pdf",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["read selected PDF", "write new PDF artifact"],
+    "confirmActions": ["overwrite an existing artifact"],
+    "denyActions": ["overwrite attachment", "read files outside the run workspace"]
+  },
+  "progress": {
+    "label": "PDF 파일 처리",
+    "detail": "PDF 내용을 확인하고 요청된 결과를 별도 파일로 생성합니다"
+  }
+}

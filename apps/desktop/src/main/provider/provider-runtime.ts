@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
+import { currentDesktopPlatform, executableCandidatesFromPath, inheritedEnvironmentNames, loginTerminalLaunchSpec } from '../platform/platform-runtime';
 
 const maxOutputBytes = 8_000_000;
 
@@ -21,9 +22,8 @@ export async function locateNativeExecutable(
   name: string,
   candidates: string[] = [],
 ): Promise<{ path: string; version: string } | undefined> {
-  const paths = new Set(candidates);
-  const fromPath = await collect('where.exe', [`${name}.exe`], process.cwd(), undefined, 5_000);
-  for (const line of fromPath.stdout.split(/\r?\n/)) if (line.trim()) paths.add(line.trim());
+  const platform = currentDesktopPlatform();
+  const paths = new Set([...candidates, ...executableCandidatesFromPath(name, platform)]);
 
   for (const candidate of paths) {
     try {
@@ -46,21 +46,12 @@ export async function launchLoginTerminal(options: {
   homeEnvironmentName: 'CODEX_HOME' | 'CLAUDE_CONFIG_DIR';
 }): Promise<void> {
   const environment = { [options.homeEnvironmentName]: options.cwd };
-  const commandArgs = options.args.map((value) => `'${escapePowerShell(value)}'`).join(' ');
-  const command = `$env:${options.homeEnvironmentName}='${escapePowerShell(options.cwd)}'; & '${escapePowerShell(options.executablePath)}' ${commandArgs}`;
-
-  if (process.platform === 'win32') {
-    const encodedCommand = Buffer.from(command, 'utf16le').toString('base64');
-    const launcher = [
-      "$process = Start-Process -FilePath 'powershell.exe'",
-      `-WorkingDirectory '${escapePowerShell(options.cwd)}'`,
-      `-ArgumentList @('-NoLogo','-NoProfile','-NoExit','-EncodedCommand','${encodedCommand}')`,
-      '-WindowStyle Normal -PassThru',
-    ].join(' ');
-    const verifiedLauncher = `${launcher}; if (-not $process) { throw 'Could not open the provider login terminal.' }`;
+  const platform = currentDesktopPlatform();
+  const launch = loginTerminalLaunchSpec(platform, options);
+  if (platform === 'win32') {
     const result = await collect(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', verifiedLauncher],
+      launch.command,
+      launch.args,
       options.cwd,
       undefined,
       10_000,
@@ -72,16 +63,17 @@ export async function launchLoginTerminal(options: {
     return;
   }
 
-  const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NoExit', '-Command', command], {
-    cwd: options.cwd,
-    detached: true,
-    windowsHide: false,
-    shell: false,
-    stdio: 'ignore',
-    env: safeEnvironment(environment),
-  });
-  child.once('error', () => undefined);
-  child.unref();
+  const result = await collect(
+    launch.command,
+    launch.args,
+    options.cwd,
+    undefined,
+    10_000,
+    safeEnvironment(environment),
+  );
+  if (result.exitCode !== 0) {
+    throw new Error((result.stderr || result.stdout || 'Could not open the provider login terminal.').trim());
+  }
 }
 
 export function collect(
@@ -179,6 +171,12 @@ function terminateProcessTree(pid: number | undefined): void {
     killer.once('error', () => undefined);
     return;
   }
+  const childKiller = spawn('/usr/bin/pkill', ['-TERM', '-P', String(pid)], {
+    windowsHide: true,
+    shell: false,
+    stdio: 'ignore',
+  });
+  childKiller.once('error', () => undefined);
   try {
     process.kill(pid, 'SIGTERM');
   } catch {
@@ -187,7 +185,7 @@ function terminateProcessTree(pid: number | undefined): void {
 }
 
 export function safeEnvironment(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const names = ['SystemRoot', 'WINDIR', 'PATH', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'COMSPEC', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'CODEX_CA_CERTIFICATE', 'SSL_CERT_FILE'];
+  const names = inheritedEnvironmentNames(currentDesktopPlatform());
   const env: NodeJS.ProcessEnv = {};
   for (const name of names) if (process.env[name]) env[name] = process.env[name];
   return { ...env, ...extra };
@@ -196,8 +194,4 @@ export function safeEnvironment(extra: Record<string, string> = {}): NodeJS.Proc
 export function authError(result: ProcessOutput | undefined, fallback: string): string | undefined {
   if (!result || result.exitCode === 0) return undefined;
   return (result.stderr || result.stdout || fallback).trim();
-}
-
-function escapePowerShell(value: string): string {
-  return value.replace(/'/g, "''");
 }

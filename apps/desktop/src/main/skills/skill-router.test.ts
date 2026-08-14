@@ -34,6 +34,18 @@ test('auto keeps stable questions in conversation mode', async () => {
   assert.equal(route.agentBrowserRequired, false);
 });
 
+test('attachments keep Auto mode local and route format-specific document skills', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '이 파일의 합계를 확인하고 수정본을 만들어줘',
+    attachments: [{ id: '11111111-1111-4111-8111-111111111111', name: 'launch-plan.xlsx', kind: 'xlsx', size: 4096 }],
+  });
+  assert.equal(route.resolvedMode, 'chat');
+  assert.equal(route.agentBrowserRequired, false);
+  assert.deepEqual(route.skills.map((skill) => skill.id), ['xgen.conversation', 'xgen.xlsx']);
+});
+
 test('auto selects read-only research for current information', async () => {
   const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '오늘 서울 날씨를 찾아줘' });
   assert.equal(route.resolvedMode, 'search');
@@ -132,6 +144,33 @@ test('adds form guard when a consequential browser action is requested', async (
   assert.equal(route.skills.some((skill) => skill.id === 'xgen.form-guard'), true);
 });
 
+test('routes Korean login requests through secure login and form guard skills', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'auto',
+    prompt: '네이버 로그인해줘',
+  });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.equal(route.agentBrowserRequired, true);
+  assert.equal(route.browserVisible, true);
+  assert.equal(route.skills.some((skill) => skill.id === 'xgen.login-assistant'), true);
+  assert.equal(route.skills.some((skill) => skill.id === 'xgen.form-guard'), true);
+  assert.equal(route.skills.find((skill) => skill.id === 'xgen.login-assistant')?.runtime.tools.includes('agent_browser_auth_login'), true);
+  assert.equal(route.steps.some((step) => step.id === 'auth-device'), true);
+});
+
+test('routes explicit saved credential requests through the opaque Password Manager boundary', async () => {
+  const route = await router().route({
+    ...baseRequest,
+    mode: 'browser-agent',
+    prompt: '저장된 비밀번호 관리자로 이 사이트에 자동 입력해줘',
+  });
+
+  const passwordManager = route.skills.find((skill) => skill.id === 'xgen.password-manager');
+  assert.equal(passwordManager?.runtime.tools.includes('agent_browser_auth_login'), true);
+  assert.equal(passwordManager?.permissions.denyActions.includes('credential-disclosure'), true);
+});
+
 test('blocks browser execution when every required browser skill is disabled', async () => {
   const route = await router({
     'global:browser-navigation': false,
@@ -148,10 +187,12 @@ test('blocks browser execution when every required browser skill is disabled', a
 
 test('loads the real Skill packages and their runtime bindings', () => {
   const catalog = router().list();
-  assert.equal(catalog.length, 8);
+  assert.equal(catalog.length, 14);
   assert.equal(catalog.find((skill) => skill.id === 'xgen.web-research')?.runtime.kind, 'provider-web');
   assert.deepEqual(catalog.find((skill) => skill.id === 'xgen.browser-navigation')?.runtime.toolProfiles, ['core', 'tabs']);
   assert.match(catalog.find((skill) => skill.id === 'xgen.form-guard')?.markdown ?? '', /## Workflow/);
+  assert.equal(catalog.find((skill) => skill.id === 'xgen.pdf')?.runtime.kind, 'llm');
+  assert.match(catalog.find((skill) => skill.id === 'xgen.password-manager')?.markdown ?? '', /Password bytes must never enter provider context/);
 });
 
 test('injects selected Skill workflows and reference contracts into provider context', async () => {

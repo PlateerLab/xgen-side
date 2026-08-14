@@ -1777,14 +1777,23 @@ fn append_credential_policy_action_for(
     provider: &str,
     plugins: &[crate::plugins::PluginConfig],
 ) {
-    if crate::plugins::find_plugin(plugins, provider).is_some_and(|plugin| {
-        crate::plugins::plugin_has_capability(plugin, crate::plugins::CAPABILITY_CREDENTIAL_READ)
-    }) {
-        actions.push(crate::plugins::plugin_policy_action(
-            provider,
-            crate::plugins::CAPABILITY_CREDENTIAL_READ,
-        ));
-    }
+    let Some(plugin) = crate::plugins::find_plugin(plugins, provider) else {
+        return;
+    };
+    let capability = if crate::plugins::plugin_has_capability(
+        plugin,
+        crate::plugins::CAPABILITY_CREDENTIAL_INJECT,
+    ) {
+        crate::plugins::CAPABILITY_CREDENTIAL_INJECT
+    } else if crate::plugins::plugin_has_capability(
+        plugin,
+        crate::plugins::CAPABILITY_CREDENTIAL_READ,
+    ) {
+        crate::plugins::CAPABILITY_CREDENTIAL_READ
+    } else {
+        return;
+    };
+    actions.push(crate::plugins::plugin_policy_action(provider, capability));
 }
 
 fn plugins_from_command_or_env(cmd: &Value) -> Vec<crate::plugins::PluginConfig> {
@@ -10407,6 +10416,29 @@ async fn handle_auth_login(cmd: &Value, state: &mut DaemonState) -> Result<Value
                 serde_json::from_value::<Vec<crate::plugins::PluginConfig>>(v.clone()).ok()
             })
             .unwrap_or_else(crate::plugins::plugins_from_env);
+        if crate::plugins::find_plugin(&command_plugins, provider).is_some_and(|plugin| {
+            crate::plugins::plugin_has_capability(
+                plugin,
+                crate::plugins::CAPABILITY_CREDENTIAL_INJECT,
+            )
+        }) {
+            let injected = crate::plugins::inject_credential_with_plugins(
+                provider,
+                &command_plugins,
+                crate::plugins::CredentialResolveRequest {
+                    profile_name: name,
+                    item_ref: cmd.get("credentialItem").and_then(|v| v.as_str()),
+                    url: url_override,
+                },
+            )
+            .await?;
+            return Ok(json!({
+                "credentialInjected": true,
+                "submitted": injected.submitted,
+                "usernameFilled": injected.username_filled,
+                "name": name,
+            }));
+        }
         let resolved = crate::plugins::resolve_credential_with_plugins(
             provider,
             &command_plugins,
@@ -12061,6 +12093,31 @@ mod tests {
         let actions = policy_actions_for_command(&cmd, "auth_login", false);
 
         assert_eq!(actions, vec!["auth_login".to_string()]);
+    }
+
+    #[test]
+    fn test_policy_uses_host_injection_capability_without_credential_read() {
+        let cmd = json!({
+            "action": "auth_login",
+            "id": "policy-host-injection",
+            "name": "example",
+            "credentialProvider": "xgen-vault",
+            "plugins": [{
+                "name": "xgen-vault",
+                "command": "trusted-host-injector",
+                "capabilities": ["credential.inject"]
+            }]
+        });
+
+        let actions = policy_actions_for_command(&cmd, "auth_login", false);
+
+        assert_eq!(
+            actions,
+            vec![
+                "auth_login".to_string(),
+                "plugin:xgen-vault:credential.inject".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]

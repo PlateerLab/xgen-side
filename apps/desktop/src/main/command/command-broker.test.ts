@@ -4,7 +4,7 @@ import { CommandBroker } from './command-broker';
 
 test('executes an allowed read-only command without approval', async () => {
   const broker = new CommandBroker();
-  const result = await broker.request({ shell: 'cmd', script: 'whoami' });
+  const result = await broker.request({ shell: process.platform === 'win32' ? 'cmd' : 'zsh', script: 'whoami' });
 
   assert.equal(result.state, 'completed');
   assert.equal(result.exitCode, 0);

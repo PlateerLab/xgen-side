@@ -1,6 +1,7 @@
 import { BrowserWindow, WebContentsView, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { normalizeBrowserAddress } from './browser-address';
+import { openBrowserCdpGateway, type BrowserCdpGatewayConnection } from './security/browser-cdp-gateway';
 import type { BrowserAgentStatus, BrowserHistoryEntry, BrowserLayoutState, BrowserSnapshot, BrowserTabOwner, BrowserTabState, PageContext } from '../shared/contracts';
 
 interface BrowserTab {
@@ -27,6 +28,7 @@ export interface AgentBrowserTarget {
 
 export class BrowserWorkspace {
   private readonly tabs = new Map<string, BrowserTab>();
+  private readonly cdpGateways = new Map<string, BrowserCdpGatewayConnection>();
   private readonly history: BrowserHistoryEntry[] = [];
   private activeTabId: string | undefined;
   private attachedTabId: string | undefined;
@@ -44,7 +46,7 @@ export class BrowserWorkspace {
     window.on('resize', () => this.layout());
   }
 
-  async createTab(url = 'https://www.google.com/'): Promise<BrowserTabState[]> {
+  async createTab(url = 'about:blank'): Promise<BrowserTabState[]> {
     await this.createManagedTab(url, 'user');
     return this.snapshot();
   }
@@ -58,6 +60,24 @@ export class BrowserWorkspace {
     tab.agentStatus = 'running';
     this.emit();
     return { tab: this.tabState(tab), targetId: await this.automationTargetId(tab.id) };
+  }
+
+  async openAgentCdpGateway(tabId: string, agentRunId: string): Promise<string> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.agentRunId !== agentRunId || tab.credentialProtected) {
+      throw new Error('The Agent browser tab is unavailable.');
+    }
+    await this.closeAgentCdpGateway(agentRunId);
+    const gateway = await openBrowserCdpGateway(tab.view.webContents);
+    this.cdpGateways.set(agentRunId, gateway);
+    return gateway.url;
+  }
+
+  async closeAgentCdpGateway(agentRunId: string): Promise<void> {
+    const gateway = this.cdpGateways.get(agentRunId);
+    if (!gateway) return;
+    this.cdpGateways.delete(agentRunId);
+    await gateway.close();
   }
 
   async attachActiveTabToAgentRun(agentRunId: string): Promise<AgentBrowserTarget | undefined> {
@@ -126,6 +146,7 @@ export class BrowserWorkspace {
       this.window.contentView.removeChildView(tab.view);
       this.attachedTabId = undefined;
     }
+    if (tab.agentRunId) void this.closeAgentCdpGateway(tab.agentRunId);
     tab.view.webContents.close();
     this.tabs.delete(id);
 
@@ -168,7 +189,28 @@ export class BrowserWorkspace {
     return {
       contents,
       protect: () => {
-        if (this.tabs.get(id) === tab) tab.credentialProtected = true;
+        if (this.tabs.get(id) === tab) {
+          tab.credentialProtected = true;
+          if (tab.agentRunId) void this.closeAgentCdpGateway(tab.agentRunId);
+        }
+      },
+    };
+  }
+
+  agentCredentialAutofillTarget(id: string, agentRunId: string): BrowserCredentialAutofillTarget | undefined {
+    const tab = this.tabs.get(id);
+    if (!tab || tab.id !== this.activeTabId || tab.id !== this.attachedTabId || tab.agentRunId !== agentRunId) {
+      return undefined;
+    }
+    const contents = tab.view.webContents;
+    if (contents.isDestroyed()) return undefined;
+    return {
+      contents,
+      protect: () => {
+        if (this.tabs.get(id) === tab) {
+          tab.credentialProtected = true;
+          void this.closeAgentCdpGateway(agentRunId);
+        }
       },
     };
   }
@@ -375,7 +417,13 @@ export class BrowserWorkspace {
   }
 
   async captureSnapshot(reason: string, tabId?: string): Promise<BrowserSnapshot | undefined> {
-    const tab = tabId ? this.tabs.get(tabId) : this.activeTab();
+    const requestedTab = tabId ? this.tabs.get(tabId) : undefined;
+    const activeTab = this.activeTab();
+    const tab = requestedTab && requestedTab.url !== 'about:blank'
+      ? requestedTab
+      : activeTab && activeTab.url !== 'about:blank'
+        ? activeTab
+        : [...this.tabs.values()].findLast((candidate) => candidate.url !== 'about:blank' && !candidate.credentialProtected);
     if (!tab || tab.credentialProtected || tab.view.webContents.isDestroyed() || tab.url === 'about:blank') return undefined;
     const temporarilyAttached = this.attachedTabId !== tab.id;
     if (temporarilyAttached) {
@@ -391,9 +439,34 @@ export class BrowserWorkspace {
       });
       tab.view.setVisible(true);
     }
+    const sensitivePage = /(?:login|signin|auth|passkey|qrcode)/i.test(tab.url);
+    const redactionToken = `xgen-${randomUUID()}`;
     try {
+      if (sensitivePage) {
+        await tab.view.webContents.executeJavaScript(`(() => {
+          const token = ${JSON.stringify(redactionToken)};
+          const sensitive = new Set([
+            ...document.querySelectorAll('input[type="password"], input[autocomplete*="password" i], input[autocomplete*="one-time-code" i], canvas'),
+            ...[...document.querySelectorAll('*')].filter((element) => /(?:^|[-_])(qr|qrcode|otp|passkey)(?:[-_]|$)/i.test(String(element.id || '') + ' ' + String(element.className || ''))),
+          ]);
+          for (const element of sensitive) element.setAttribute('data-xgen-redaction', token);
+          const style = document.createElement('style');
+          style.id = token;
+          style.textContent = '[data-xgen-redaction="' + token + '"] { filter: blur(14px) !important; }';
+          document.documentElement.appendChild(style);
+        })()`, true).catch(() => undefined);
+      }
       await delay(80);
-      const image = await withTimeout(tab.view.webContents.capturePage(), 2_500);
+      const bounds = tab.view.getBounds();
+      const safeRect = {
+        x: 0,
+        y: 0,
+        width: bounds.width,
+        height: sensitivePage
+          ? Math.min(150, bounds.height)
+          : Math.min(Math.round(bounds.width * 10 / 16), bounds.height),
+      };
+      const image = await withTimeout(tab.view.webContents.capturePage(safeRect), 2_500);
       if (!image || image.isEmpty()) return undefined;
       return {
         id: randomUUID(),
@@ -401,10 +474,17 @@ export class BrowserWorkspace {
         title: tab.title || tab.url,
         url: tab.url,
         capturedAt: new Date().toISOString(),
-        reason,
+        reason: sensitivePage ? `보호된 로그인 화면 상단 · ${reason}` : reason,
         imageDataUrl: image.toDataURL(),
       };
     } finally {
+      if (sensitivePage && !tab.view.webContents.isDestroyed()) {
+        await tab.view.webContents.executeJavaScript(`(() => {
+          const token = ${JSON.stringify(redactionToken)};
+          document.getElementById(token)?.remove();
+          for (const element of document.querySelectorAll('[data-xgen-redaction="' + token + '"]')) element.removeAttribute('data-xgen-redaction');
+        })()`, true).catch(() => undefined);
+      }
       if (temporarilyAttached) {
         tab.view.setVisible(false);
         this.window.contentView.removeChildView(tab.view);

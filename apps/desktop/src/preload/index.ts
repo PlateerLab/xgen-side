@@ -12,6 +12,7 @@ import type {
   AppSettings,
   LocalDataStatus,
   LocalMarkdownFile,
+  PersistedWorkspaceState,
   ProviderId,
   ProviderStatus,
   XgenSideApi,
@@ -79,6 +80,18 @@ const api: XgenSideApi = {
     listMarkdown: (): Promise<LocalMarkdownFile[]> => ipcRenderer.invoke('local-data:list-markdown'),
     readMarkdown: (relativePath: string): Promise<string> => ipcRenderer.invoke('local-data:read-markdown', relativePath),
     writeMarkdown: (relativePath: string, content: string): Promise<void> => ipcRenderer.invoke('local-data:write-markdown', relativePath, content),
+  },
+  files: {
+    pick: () => ipcRenderer.invoke('files:pick'),
+    discard: (id: string) => ipcRenderer.invoke('files:discard', id),
+  },
+  artifacts: {
+    open: (sessionId: string, relativePath: string) => ipcRenderer.invoke('artifacts:open', sessionId, relativePath),
+    reveal: (sessionId: string, relativePath: string) => ipcRenderer.invoke('artifacts:reveal', sessionId, relativePath),
+  },
+  workspace: {
+    load: (): Promise<PersistedWorkspaceState> => ipcRenderer.invoke('workspace:load'),
+    saveChats: (state: Pick<PersistedWorkspaceState, 'activeChatId' | 'chats' | 'chatMessages'>): Promise<void> => ipcRenderer.invoke('workspace:save-chats', state),
   },
   settings: {
     load: (): Promise<AppSettings> => ipcRenderer.invoke('settings:load'),

@@ -1,10 +1,10 @@
 # XGEN Side
 
-A skill-first AI browser that runs locally on Windows.
+A skill-first AI browser that runs locally on macOS and Windows.
 
-XGEN Side brings general chat, web research, and real browser automation together in one desktop application. Auto mode lets the Skill Router choose the smallest required capability for each request, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
+XGEN Side brings general chat, local DOCX, XLSX, PPTX, and PDF work, web research, real browser automation, and a model-blind local Password Manager together in one desktop application. Auto mode lets the Skill Router choose the smallest required capability for each request, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
 
-> Current status: early Windows desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
+> Current status: early cross-platform desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
 
 ## Product layout
 
@@ -13,6 +13,8 @@ XGEN Side brings general chat, web research, and real browser automation togethe
 - Right panel: ask questions against a normal page, or inspect the same Agent Run that was started from general chat while its live browser tab is open
 - Browser Agent Overview: when a request requires browser work, display the selected skills, execution steps, target site, permitted actions, and event-driven browser screenshots
 - General chat Skill selector: pin an enabled Skill for a request, or leave it on Auto so the Skill Router chooses the execution boundary
+- Settings replaces the ordinary app sidebar with one searchable first-level settings menu, provides a direct return to the previous app surface, and lets the detail workspace use the full remaining window.
+- Aside-style Ask AI, Reply, and Side chat composers. A completed Agent browser tab accepts follow-up messages in the same chat and reuses the visible browser tab.
 - Agent browser tabs: browser-backed chat requests receive a run-owned tab; opening it shows the live page with the same progress stream instead of starting a second run
 - Reasoning effort: use Auto, Fast, Balanced, Deep, or Very Deep for Codex models while unsupported providers keep their own default
 - Light and dark themes with the XGEN accent color `#305EEB`
@@ -55,10 +57,15 @@ XGEN Side is designed to use CLI providers authenticated on the user's machine w
 - Providers are registered in Settings; the provider and model are selected inside the chat composer
 - Provider-specific behavior is normalized behind a shared adapter contract
 
-XGEN Side does not read or store provider subscription tokens. Optional website Auto login passwords are stored only in a separate OS-encrypted local vault and are never returned to the AI provider. Authentication remains the responsibility of each provider's official CLI.
+XGEN Side does not read or store provider subscription tokens. Optional website Auto login passwords are stored only in a separate OS-encrypted local vault and are never returned to the AI provider. Browser login runs may click visible login and passkey controls without interrupting the trusted login workflow, but resolving one exact-origin saved credential still requires an in-app approval and a one-time loopback capability. Passkeys stay in the native Chromium and operating-system WebAuthn prompt, so Touch ID or Windows Hello verification remains a direct user action. Authentication to the AI provider remains the responsibility of each provider's official CLI.
 
 ## Local execution and security
 
+- Saved browser passwords are OS-encrypted and injected by the trusted XGEN desktop main process. AI providers and MCP receive only approval and completion states; password plaintext is never returned through the credential plugin protocol.
+- Settings lists fourteen first-party XGEN Skill packages. Password Manager is a separate guarded package with an exact-origin, opaque-reference contract, while Login Assistant owns passkey, QR, OAuth, and signed-in verification handoffs.
+- Browser cookies are treated as session data rather than saved passwords. Raw cookie, storage, eval, and network inspection remain denied to normal AI browser runs.
+- The full macOS and Windows boundary, Aside findings, and production release gates are documented in [docs/xgen-side/credential-security-boundary.md](docs/xgen-side/credential-security-boundary.md).
+- Starts the in-repository Rust `xgen-daemon` over private stdio with a one-time session token and a versioned protocol. The daemon owns health, lifecycle, fixed-key local storage, and run-scoped browser MCP relays. Providers receive only an opaque relay capability, while the authenticated tab-scoped CDP URL, browser policy, approval, and credential-injection values remain in the trusted daemon's `agent-browser` child process. Settings, workspace state, and credential ciphertext persist through core RPC. Electron does not expose a process-wide remote debugging port.
 - Uses Windows PowerShell as the default command shell
 - Routes commands through the Command Broker instead of executing them directly
 - Separates read-only commands, approval-required commands, and denied commands
@@ -70,9 +77,10 @@ XGEN Side does not read or store provider subscription tokens. Optional website 
 
 ### Requirements
 
-- Windows 11
+- macOS 13 or later, or Windows 11
 - Node.js 24 or later
 - pnpm 11.1.3 or later
+- The stable Rust toolchain for development builds
 - An installed and authenticated Codex CLI or Claude Code CLI, depending on the providers you want to use
 
 ### Install and run
@@ -90,6 +98,21 @@ pnpm test:xgen-side
 pnpm build:xgen-side
 ```
 
+### Package the desktop app
+
+```powershell
+# Current host, unpacked application for smoke testing
+pnpm package:xgen-side:dir
+
+# Run macOS packaging on macOS
+pnpm package:xgen-side:mac
+
+# Run Windows x64 packaging on Windows
+pnpm package:xgen-side:win
+```
+
+One shared `electron-builder` configuration packages the renderer, Skills, provider bridges, `agent-browser`, and `xgen-daemon`. macOS and Windows builds differ only in native binary, signing, and installer targets. Release macOS builds still require a Developer ID identity, notarization credentials, and the final WebAuthn keychain access group. Windows release builds still require a code-signing identity and a real Windows Hello smoke test.
+
 GitHub Actions runs only these three checks on Windows. It does not automatically run the upstream npm publishing pipeline, create GitHub Releases, or build Linux and macOS binaries.
 
 ## Repository structure
@@ -99,6 +122,8 @@ apps/desktop/                XGEN Side Electron application
   src/main/                  Providers, skills, policies, browser, local storage
   src/preload/               Typed IPC bridge
   src/renderer/              Chat, browser, settings, and Overview UI
+crates/xgen-core/            Platform-neutral trusted core and IPC contracts
+crates/xgen-daemon/          Local core process and private stdio transport
 cli/                         Embedded agent-browser engine
 skill-data/                  Engine skills and supporting references
 docs/xgen-side/              XGEN Side architecture documentation
@@ -121,6 +146,8 @@ See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs
 - [x] Real-time provider output and run cancellation
 - [x] Manual Skill selection for general chat requests
 - [x] Run-owned Agent browser tabs with shared progress in the browser side panel
+- [x] Versioned XGEN Core process handshake and lifecycle
+- [x] Shared macOS and Windows package layout with platform-native core and browser binaries
 - [ ] Live Electron tab rendering inside the Overview
 - [ ] Approval UI for command and consequential browser actions
 - [ ] Windows installer and automatic updates

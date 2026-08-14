@@ -63,7 +63,7 @@ export class CodexAdapter implements ProviderAdapter {
       'exec',
       '--json',
       '--model', request.model,
-      '--sandbox', browser ? 'workspace-write' : 'read-only',
+      '--sandbox', browser || (request.attachments?.length && request.permissionMode !== 'read-only') ? 'workspace-write' : 'read-only',
       '--cd', session.workspace,
       '--skip-git-repo-check',
     ];
@@ -75,14 +75,13 @@ export class CodexAdapter implements ProviderAdapter {
 
     if (browser) {
       args.push(...codexBrowserMcpOverrides(browser));
-      Object.assign(extraEnvironment, browser.environment);
     }
     args.push('-');
     return {
       executable,
       args,
       env: safeEnvironment(extraEnvironment),
-      sandbox: browser ? 'workspace-write' : 'read-only',
+      sandbox: browser || (request.attachments?.length && request.permissionMode !== 'read-only') ? 'workspace-write' : 'read-only',
     };
   }
 
@@ -142,6 +141,10 @@ export class CodexAdapter implements ProviderAdapter {
 
   private async locate(): Promise<{ path: string; version: string } | undefined> {
     const candidates: string[] = [];
+    const home = process.env.HOME;
+    if (home) {
+      candidates.push(...codexMacExecutableCandidates(home));
+    }
     const appData = process.env.APPDATA;
     if (appData) {
       candidates.push(...codexNpmExecutableCandidates(appData, process.arch));
@@ -174,11 +177,20 @@ export class CodexAdapter implements ProviderAdapter {
   }
 }
 
+export function codexMacExecutableCandidates(home: string): string[] {
+  return [
+    join(home, '.local', 'bin', 'codex'),
+    join(home, '.npm-global', 'bin', 'codex'),
+    '/Applications/ChatGPT.app/Contents/Resources/codex',
+    '/Applications/Codex.app/Contents/Resources/codex',
+    '/Applications/Codex.app/Contents/MacOS/codex',
+  ];
+}
+
 export function codexBrowserMcpOverrides(browser: BrowserBridge): string[] {
-  const toolProfiles = browser.toolProfiles.join(',') || 'core';
   return [
     '-c', `mcp_servers.xgen_browser.command=${tomlString(browser.executablePath)}`,
-    '-c', `mcp_servers.xgen_browser.args=["mcp","--tools",${tomlString(toolProfiles)}]`,
+    '-c', `mcp_servers.xgen_browser.args=[${browser.args.map(tomlString).join(',')}]`,
     '-c', `mcp_servers.xgen_browser.env=${tomlInlineTable(browser.environment)}`,
     '-c', 'mcp_servers.xgen_browser.default_tools_approval_mode="approve"',
   ];

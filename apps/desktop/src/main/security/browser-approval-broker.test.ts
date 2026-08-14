@@ -19,11 +19,16 @@ test('only the registered run can resolve a one-shot approval', async () => {
   const broker = new BrowserApprovalBroker();
   await broker.start();
   let approvalId = '';
-  const connection = broker.registerRun('run-1', (approval) => { approvalId = approval.id; });
+  let resolveRequested: (() => void) | undefined;
+  const requested = new Promise<void>((resolve) => { resolveRequested = resolve; });
+  const connection = broker.registerRun('run-1', (approval) => {
+    approvalId = approval.id;
+    resolveRequested?.();
+  });
   const result = request(connection.address, {
     runId: 'run-1', token: connection.token, confirmationId: 'engine-1', action: 'upload', detail: '{"files":["invoice.pdf"]}',
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await requested;
   assert.ok(approvalId);
   assert.equal(broker.respond('other-run', approvalId, 'allow'), false);
   assert.equal(broker.respond('run-1', approvalId, 'allow'), true);
@@ -48,11 +53,13 @@ test('rejects an invalid token without creating an approval', async () => {
 test('unregistering a run fails pending approvals closed', async () => {
   const broker = new BrowserApprovalBroker();
   await broker.start();
-  const connection = broker.registerRun('run-1', () => undefined);
+  let resolveRequested: (() => void) | undefined;
+  const requested = new Promise<void>((resolve) => { resolveRequested = resolve; });
+  const connection = broker.registerRun('run-1', () => resolveRequested?.());
   const result = request(connection.address, {
     runId: 'run-1', token: connection.token, confirmationId: 'engine-1', action: 'download',
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await requested;
   broker.unregisterRun('run-1');
   assert.deepEqual(await result, { decision: 'deny' });
   await broker.close();

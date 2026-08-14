@@ -36,6 +36,7 @@ const actionByTool: Readonly<Record<string, string>> = {
   agent_browser_dialog_status: 'dialog',
   agent_browser_dialog_accept: 'dialog',
   agent_browser_dialog_dismiss: 'dialog',
+  agent_browser_auth_login: 'auth_login',
 };
 
 export interface BrowserActionPolicyDocument {
@@ -43,6 +44,18 @@ export interface BrowserActionPolicyDocument {
   allow: string[];
   confirm: string[];
   deny: string[];
+}
+
+export function allowConfirmedAction(policy: BrowserActionPolicyDocument, action: string): void {
+  policy.confirm = policy.confirm.filter((candidate) => candidate !== action);
+  if (!policy.deny.includes(action) && !policy.allow.includes(action)) policy.allow.push(action);
+}
+
+export function confirmAllowedAction(policy: BrowserActionPolicyDocument, action: string): void {
+  policy.allow = policy.allow.filter((candidate) => candidate !== action);
+  if (!policy.deny.includes(action) && !policy.confirm.includes(action)) policy.confirm.push(action);
+  if (!policy.allow.includes('confirm')) policy.allow.push('confirm');
+  if (!policy.allow.includes('deny')) policy.allow.push('deny');
 }
 
 const readOnlyActions = new Set(['launch', 'navigate', 'back', 'forward', 'reload', 'tab_new', 'tab_list', 'tab_switch', 'read', 'snapshot', 'scroll', 'wait', 'waitforloadstate', 'gettext', 'url', 'title', 'screenshot']);

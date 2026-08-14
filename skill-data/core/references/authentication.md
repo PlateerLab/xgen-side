@@ -148,6 +148,8 @@ agent-browser get url  # Should be dashboard, not login
 
 Use credential provider plugins when credentials live in external vault software. Plugins are configured in `agent-browser.json` and run as external executables over the `agent-browser.plugin.v1` stdio JSON protocol.
 
+Trusted browser hosts should prefer `credential.inject`. Unlike `credential.read`, the injector performs exact-origin fill and submit inside the host process and returns only state such as `filled` and `submitted`; agent-browser never receives username or password plaintext.
+
 Add a plugin with `plugin add`. A plain `name` or `@scope/name` resolves from npm; `owner/repo` resolves from GitHub:
 
 ```bash

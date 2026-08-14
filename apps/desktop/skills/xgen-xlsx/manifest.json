@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.xlsx",
+  "settingKey": "documents.xlsx",
+  "category": "Documents",
+  "domain": "Local XLSX",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["chat"],
+    "intents": ["analyze spreadsheet", "edit spreadsheet", "create spreadsheet"],
+    "signals": ["xlsx", "excel", "spreadsheet", "엑셀", "스프레드시트"]
+  },
+  "runtime": {
+    "kind": "llm",
+    "capability": "local-xlsx",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["read selected XLSX", "write new XLSX artifact"],
+    "confirmActions": ["overwrite an existing artifact"],
+    "denyActions": ["overwrite attachment", "read files outside the run workspace"]
+  },
+  "progress": {
+    "label": "XLSX 파일 처리",
+    "detail": "시트와 수식을 확인하고 요청된 결과를 별도 파일로 생성합니다"
+  }
+}

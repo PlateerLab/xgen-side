@@ -1,32 +1,50 @@
-import { app, BrowserWindow, dialog, ipcMain, session, type IpcMainInvokeEvent, type Session } from 'electron';
-import { createServer } from 'node:net';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell, type IpcMainInvokeEvent, type Session } from 'electron';
 import { join } from 'node:path';
 import { BrowserWorkspace } from './browser-workspace';
 import { CommandBroker } from './command/command-broker';
 import { BrowserApprovalBroker } from './security/browser-approval-broker';
+import { CredentialBroker } from './security/credential-broker';
 import { CredentialAutofillService } from './security/credential-autofill';
 import { AgentBrowserClient } from './engine/agent-browser-client';
-import { selectBrowserCdpEndpoint } from './browser-cdp';
 import { ProviderManager } from './provider/provider-manager';
 import { CredentialVault } from './storage/credential-vault';
 import { LocalRunStore } from './storage/local-run-store';
 import { LocalSettingsStore } from './storage/local-settings-store';
+import { LocalWorkspaceStore } from './storage/local-workspace-store';
 import type { AgentRunEvent, AgentRunRequest, AppSettings, BrowserLayoutState, CommandRequest, CredentialSaveRequest, ProviderId } from '../shared/contracts';
+import { currentDesktopPlatform } from './platform/platform-runtime';
+import { configurePlatformWebAuthn } from './platform/platform-webauthn';
+import { XgenCoreClient } from './core/xgen-core-client';
 
 let mainWindow: BrowserWindow | undefined;
+const legacyDataRoot = join(app.getPath('userData'), 'agent-data');
+const appPath = app.getAppPath();
+const resourceRoot = app.isPackaged ? join(process.resourcesPath, 'xgen') : join(appPath, 'resources');
 let workspace: BrowserWorkspace | undefined;
-const engineClient = new AgentBrowserClient();
-const runStore = new LocalRunStore();
-const settingsStore = new LocalSettingsStore();
-const credentialVault = new CredentialVault();
-const credentialAutofill = new CredentialAutofillService(credentialVault, (tabId) => workspace?.credentialAutofillTarget(tabId));
+const engineClient = new AgentBrowserClient(appPath, process.resourcesPath);
+const coreClient = new XgenCoreClient(appPath, process.resourcesPath, join(legacyDataRoot, 'core-store'));
+const runStore = new LocalRunStore(legacyDataRoot);
+const settingsStore = new LocalSettingsStore(join(legacyDataRoot, 'settings.json'), coreClient);
+const workspaceStore = new LocalWorkspaceStore(join(legacyDataRoot, 'workspace.json'), coreClient);
+const credentialVault = new CredentialVault(join(legacyDataRoot, 'credentials.vault'), safeStorage, coreClient);
+const credentialAutofill = new CredentialAutofillService(
+  credentialVault,
+  (tabId) => workspace?.credentialAutofillTarget(tabId),
+  (tabId, runId) => workspace?.agentCredentialAutofillTarget(tabId, runId),
+);
 const approvalBroker = new BrowserApprovalBroker();
+const credentialBroker = new CredentialBroker({
+  inject: (runId, tabId, pageUrl, itemRef) => credentialAutofill.fillForAgent(runId, tabId, pageUrl, itemRef),
+});
 const commandBroker = new CommandBroker((request, result) => runStore.recordCommand(request, result));
 let providerManager: ProviderManager | undefined;
 const activeRuns = new Map<string, { controller: AbortController; webContentsId: number }>();
+let coreShutdownComplete = false;
+let coreShutdownStarted = false;
 
 const hasLock = app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
+configurePlatformWebAuthn(app, currentDesktopPlatform());
 
 app.on('second-instance', () => {
   if (!mainWindow) return;
@@ -37,20 +55,23 @@ app.on('second-instance', () => {
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
-  const cdpPort = await reserveLoopbackPort();
-  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
-  app.commandLine.appendSwitch('remote-debugging-port', String(cdpPort));
   await app.whenReady();
+  const coreStatus = await coreClient.start();
+  if (!coreStatus.available) console.warn(`[xgen-core] ${coreStatus.error ?? 'Unavailable.'}`);
   await runStore.initialize();
   await approvalBroker.start();
+  await credentialBroker.start();
   providerManager = new ProviderManager(
     runStore,
     engineClient,
+    coreClient,
     settingsStore,
-    cdpPort,
+    resourceRoot,
+    (path) => shell.openPath(path),
+    (tabId, runId) => workspace?.openAgentCdpGateway(tabId, runId) ?? Promise.reject(new Error('브라우저 작업 공간이 준비되지 않았습니다.')),
+    (runId) => workspace?.closeAgentCdpGateway(runId) ?? Promise.resolve(),
     (sinceMs, tabId) => workspace?.historySince(sinceMs, tabId) ?? [],
     (reason, tabId) => workspace?.captureSnapshot(reason, tabId) ?? Promise.resolve(undefined),
-    (tabId) => resolveBrowserCdp(cdpPort, tabId),
     async (runId, request, route) => {
       if (!workspace) throw new Error('브라우저 작업 공간이 준비되지 않았습니다.');
       const useCurrentTab = request.browserTarget === 'current-tab' || request.sourceSurface === 'browser-side';
@@ -63,33 +84,33 @@ async function bootstrap(): Promise<void> {
     },
     (runId, status) => workspace?.updateAgentRunStatus(runId, status),
     approvalBroker,
+    credentialBroker,
   );
   configureSessionSecurity();
   registerIpc();
   await createWindow();
 }
 
-async function resolveBrowserCdp(cdpPort: number, tabId?: string): Promise<string | undefined> {
-  const targetUrl = tabId ? workspace?.urlForTab(tabId) : workspace?.activeUrl();
-  if (!targetUrl) return undefined;
-  try {
-    const response = await fetch(`http://127.0.0.1:${cdpPort}/json`);
-    const targets = await response.json() as Array<{ type?: string; url?: string }>;
-    return selectBrowserCdpEndpoint(cdpPort, targetUrl, targets);
-  } catch {
-    return undefined;
-  }
-}
-
 app.on('window-all-closed', () => {
   app.quit();
 });
 
+app.on('before-quit', (event) => {
+  if (coreShutdownComplete || !coreClient.isRunning()) return;
+  event.preventDefault();
+  if (coreShutdownStarted) return;
+  coreShutdownStarted = true;
+  void coreClient.stop().finally(() => {
+    coreShutdownComplete = true;
+    app.quit();
+  });
+});
+
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
-    width: 1680,
+    width: 1255,
     height: 1040,
-    minWidth: 1180,
+    minWidth: 900,
     minHeight: 760,
     backgroundColor: '#00000000',
     title: 'XGEN Side',
@@ -106,6 +127,7 @@ async function createWindow(): Promise<void> {
 
   workspace = new BrowserWorkspace(mainWindow, (tabs) => {
     mainWindow?.webContents.send('browser:tabs-changed', tabs);
+    void workspaceStore.saveBrowserTabs(tabs);
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -119,7 +141,10 @@ async function createWindow(): Promise<void> {
   // at all and leaves only the embedded web view visible.
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
-  await workspace.createTab();
+  const savedWorkspace = await workspaceStore.load();
+  for (const url of savedWorkspace.browser.urls) await workspace.createTab(url);
+  const restoredTab = workspace.listTabs()[savedWorkspace.browser.activeIndex];
+  if (restoredTab) workspace.activateTab(restoredTab.id);
 }
 
 function configureWindowMaterial(window: BrowserWindow): void {
@@ -181,6 +206,7 @@ function configurePermissions(targetSession: Session): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('core:status', () => coreClient.status());
   ipcMain.handle('engine:status', () => engineClient.status());
   ipcMain.handle('browser:list-tabs', () => workspace?.listTabs() ?? []);
   ipcMain.handle('browser:new-tab', (_event, url?: string) => workspace?.createTab(url));
@@ -220,7 +246,9 @@ function registerIpc(): void {
       workspace?.updateAgentRunStatus(requestId, controller.signal.aborted ? 'cancelled' : 'failed');
       throw error;
     } finally {
+      await providerManager.releaseBrowserRun(requestId);
       approvalBroker.unregisterRun(requestId);
+      credentialBroker.unregisterRun(requestId);
       activeRuns.delete(requestId);
       if (!event.sender.isDestroyed()) event.sender.removeListener('destroyed', onDestroyed);
     }
@@ -228,7 +256,8 @@ function registerIpc(): void {
   ipcMain.handle('agent:approval-response', (event, requestId: string, approvalId: string, decision: 'allow' | 'deny') => {
     const active = activeRuns.get(requestId);
     if (!active || active.webContentsId !== event.sender.id || (decision !== 'allow' && decision !== 'deny')) return false;
-    return approvalBroker.respond(requestId, approvalId, decision);
+    return approvalBroker.respond(requestId, approvalId, decision)
+      || credentialBroker.respond(requestId, approvalId, decision);
   });
   ipcMain.handle('agent:cancel', (event, requestId: string) => {
     const active = activeRuns.get(requestId);
@@ -243,6 +272,42 @@ function registerIpc(): void {
   ipcMain.handle('local-data:list-markdown', () => runStore.listMarkdown());
   ipcMain.handle('local-data:read-markdown', (_event, relativePath: string) => runStore.readMarkdown(relativePath));
   ipcMain.handle('local-data:write-markdown', (_event, relativePath: string, content: string) => runStore.writeMarkdown(relativePath, content));
+  ipcMain.handle('files:pick', async (event) => {
+    assertShellIpcSender(event);
+    const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const options = {
+      title: '문서 첨부',
+      properties: ['openFile', 'multiSelections'] as Array<'openFile' | 'multiSelections'>,
+      filters: [{ name: 'Documents', extensions: ['docx', 'xlsx', 'pptx', 'pdf'] }],
+    };
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    if (result.canceled || !result.filePaths.length) return [];
+    return runStore.stageAttachments(result.filePaths);
+  });
+  ipcMain.handle('files:discard', (event, id: string) => {
+    assertShellIpcSender(event);
+    return runStore.discardAttachment(id);
+  });
+  ipcMain.handle('artifacts:open', async (event, sessionId: string, relativePath: string) => {
+    assertShellIpcSender(event);
+    const path = runStore.resolveArtifactPath(sessionId, relativePath);
+    const error = await shell.openPath(path);
+    if (error) throw new Error(error);
+    return path;
+  });
+  ipcMain.handle('artifacts:reveal', (event, sessionId: string, relativePath: string) => {
+    assertShellIpcSender(event);
+    shell.showItemInFolder(runStore.resolveArtifactPath(sessionId, relativePath));
+    return true;
+  });
+  ipcMain.handle('workspace:load', (event) => {
+    assertShellIpcSender(event);
+    return workspaceStore.load();
+  });
+  ipcMain.handle('workspace:save-chats', (event, state) => {
+    assertShellIpcSender(event);
+    return workspaceStore.saveChats(state);
+  });
   ipcMain.handle('settings:load', () => settingsStore.load());
   ipcMain.handle('settings:save', (_event, settings: AppSettings) => settingsStore.save(settings));
   ipcMain.handle('credentials:status', (event) => {
@@ -275,26 +340,8 @@ function assertShellIpcSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-function reserveLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.unref();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close();
-        reject(new Error('Could not reserve a local CDP port.'));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => error ? reject(error) : resolve(port));
-    });
-  });
-}
-
 function sanitizeCommandRequest(request: CommandRequest): CommandRequest {
-  if (!request || !['powershell', 'cmd', 'wsl'].includes(request.shell)) {
+  if (!request || !['powershell', 'cmd', 'wsl', 'zsh'].includes(request.shell)) {
     throw new Error('Unsupported command shell.');
   }
   if (typeof request.script !== 'string' || request.script.length > 20_000) {

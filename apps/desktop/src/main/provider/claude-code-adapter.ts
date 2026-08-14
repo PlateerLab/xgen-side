@@ -75,12 +75,11 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
     if (browser) {
       const mcpConfigPath = join(session.directory, 'claude-mcp.json');
-      const toolProfiles = browser.toolProfiles.join(',') || 'core';
       await writeFile(mcpConfigPath, JSON.stringify({
         mcpServers: {
           xgen_browser: {
             command: browser.executablePath,
-            args: ['mcp', '--tools', toolProfiles],
+            args: browser.args,
             env: browser.environment,
           },
         },
@@ -90,7 +89,6 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         '--strict-mcp-config',
         '--allowedTools', 'mcp__xgen_browser__*',
       );
-      Object.assign(extraEnvironment, browser.environment);
     }
 
     return {
@@ -169,9 +167,13 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   }
 
   private locate(): Promise<{ path: string; version: string } | undefined> {
-    const candidates = process.env.USERPROFILE
-      ? [join(process.env.USERPROFILE, '.local', 'bin', 'claude.exe')]
-      : [];
+    const candidates = [
+      ...(process.env.USERPROFILE ? [join(process.env.USERPROFILE, '.local', 'bin', 'claude.exe')] : []),
+      ...(process.env.HOME ? [
+        join(process.env.HOME, '.local', 'bin', 'claude'),
+        join(process.env.HOME, '.claude', 'local', 'claude'),
+      ] : []),
+    ];
     return locateNativeExecutable('claude', candidates);
   }
 

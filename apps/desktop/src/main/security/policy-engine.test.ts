@@ -34,3 +34,10 @@ test('denies destructive recursive deletion', () => {
     'deny',
   );
 });
+
+test('applies the same guard baseline to macOS file commands', () => {
+  const engine = new PolicyEngine();
+  assert.equal(engine.evaluateCommand({ shell: 'zsh', script: 'rm -rf ./build' }).decision, 'deny');
+  assert.equal(engine.evaluateCommand({ shell: 'zsh', script: 'mkdir output' }).decision, 'ask');
+  assert.equal(engine.evaluateCommand({ shell: 'zsh', script: 'pwd' }).decision, 'allow');
+});

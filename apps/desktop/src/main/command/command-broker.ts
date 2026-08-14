@@ -129,6 +129,8 @@ function shellCommand(
       return { command: 'cmd.exe', args: ['/d', '/s', '/c', script] };
     case 'wsl':
       return { command: 'wsl.exe', args: ['--exec', 'bash', '-lc', script] };
+    case 'zsh':
+      return { command: '/bin/zsh', args: ['-f', '-c', script] };
   }
 }
 

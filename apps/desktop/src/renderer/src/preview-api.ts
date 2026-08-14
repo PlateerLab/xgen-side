@@ -174,6 +174,24 @@ if (!previewWindow.xgenSide) {
       readMarkdown: async () => '# Browser Agent Memory\n\nBrowser history and task results appear here.',
       writeMarkdown: async () => undefined,
     },
+    files: {
+      pick: async () => [],
+      discard: async () => false,
+    },
+    artifacts: {
+      open: async () => 'preview',
+      reveal: async () => false,
+    },
+    workspace: {
+      load: async () => ({
+        schemaVersion: 1,
+        activeChatId: 'new-chat',
+        chats: [{ id: 'new-chat', title: 'New Chat', time: '' }],
+        chatMessages: { 'new-chat': [] },
+        browser: { urls: ['about:blank'], activeIndex: 0 },
+      }),
+      saveChats: async () => undefined,
+    },
     settings: {
       load: async () => ({
         schemaVersion: 1,

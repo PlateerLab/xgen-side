@@ -7,12 +7,15 @@ dist/
 # Native binaries (keep the launcher scripts)
 bin/agent-browser-*
 bin/.install-method
+bin/xgen-daemon-*
 !bin/agent-browser
 !bin/agent-browser.cmd
 
 # Rust build artifacts
 cli/target/
 cli/*.o
+crates/*/target/
+crates/xgen-core/Cargo.lock
 
 # Logs
 *.log
@@ -36,6 +39,7 @@ __pycache__/
 *.jpeg
 *.jpg
 *.webm
+!apps/desktop/src/renderer/src/assets/new-tab/*.png
 test/e2e/.dogfood-output/
 
 # Package manager

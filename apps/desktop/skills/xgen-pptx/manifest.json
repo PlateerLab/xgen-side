@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.pptx",
+  "settingKey": "documents.pptx",
+  "category": "Documents",
+  "domain": "Local PPTX",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["chat"],
+    "intents": ["analyze slides", "edit slides", "create slides"],
+    "signals": ["pptx", "powerpoint", "presentation", "ppt", "파워포인트", "슬라이드"]
+  },
+  "runtime": {
+    "kind": "llm",
+    "capability": "local-pptx",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["read selected PPTX", "write new PPTX artifact"],
+    "confirmActions": ["overwrite an existing artifact"],
+    "denyActions": ["overwrite attachment", "read files outside the run workspace"]
+  },
+  "progress": {
+    "label": "PPTX 파일 처리",
+    "detail": "슬라이드 구조를 확인하고 요청된 결과를 별도 파일로 생성합니다"
+  }
+}

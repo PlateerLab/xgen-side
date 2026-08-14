@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "xgen.docx",
+  "settingKey": "documents.docx",
+  "category": "Documents",
+  "domain": "Local DOCX",
+  "enabledByDefault": true,
+  "activation": {
+    "role": "supplemental",
+    "modes": ["chat"],
+    "intents": ["analyze DOCX", "edit DOCX", "create DOCX"],
+    "signals": ["docx", "word document", "워드", "문서 수정"]
+  },
+  "runtime": {
+    "kind": "llm",
+    "capability": "local-docx",
+    "tools": []
+  },
+  "permissions": {
+    "risk": "write",
+    "allowActions": ["read selected DOCX", "write new DOCX artifact"],
+    "confirmActions": ["overwrite an existing artifact"],
+    "denyActions": ["overwrite attachment", "read files outside the run workspace"]
+  },
+  "progress": {
+    "label": "DOCX 파일 처리",
+    "detail": "문서 구조를 확인하고 요청된 결과를 별도 파일로 생성합니다"
+  }
+}

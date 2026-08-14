@@ -22,7 +22,7 @@ For cross-site comparisons, keep the visible browser synchronized with the curre
 
 - Prefer accessibility refs from a fresh snapshot over invented selectors.
 - Use a condition-based wait for expected text, URL, element, or load state.
-- Keep a stable browser session for the XGEN Side app lifetime.
+- Use the XGEN-provided browser session exactly as configured. Never pass `session`, `namespace`, `extraArgs`, `allowedDomains`, or connection overrides to a browser tool.
 - If the active target is ambiguous, list tabs and identify it by URL and title.
 - Read [references/tool-contract.md](references/tool-contract.md) when selecting tools or recovering from failures.
 

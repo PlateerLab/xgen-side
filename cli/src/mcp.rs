@@ -1415,8 +1415,16 @@ fn parity_tools() -> Vec<Value> {
         tool(
             TOOL_AUTH_LOGIN,
             "Auth login",
-            "Log in with a saved auth profile.",
-            json!({ "name": { "type": "string" } }),
+            "Log in with a saved auth profile, a credential.read provider, or a state-only credential.inject host.",
+            json!({
+                "name": { "type": "string" },
+                "credentialProvider": { "type": "string" },
+                "item": { "type": "string" },
+                "url": { "type": "string" },
+                "usernameSelector": { "type": "string" },
+                "passwordSelector": { "type": "string" },
+                "submitSelector": { "type": "string" }
+            }),
             &["name"],
         ),
         tool(
@@ -2204,7 +2212,7 @@ fn call_tool(params: Option<&Value>, config: &McpConfig) -> Result<Value, Protoc
         TOOL_CLIPBOARD_COPY => call_literal(arguments, &["clipboard", "copy"]),
         TOOL_CLIPBOARD_PASTE => call_literal(arguments, &["clipboard", "paste"]),
         TOOL_AUTH_SAVE => call_auth_save(arguments),
-        TOOL_AUTH_LOGIN => call_one_string(arguments, "auth login", "name"),
+        TOOL_AUTH_LOGIN => call_auth_login(arguments),
         TOOL_AUTH_LIST => call_literal(arguments, &["auth", "list"]),
         TOOL_AUTH_SHOW => call_one_string(arguments, "auth show", "name"),
         TOOL_AUTH_DELETE => call_one_string(arguments, "auth delete", "name"),
@@ -3031,6 +3039,31 @@ fn call_auth_save(arguments: &Value) -> Result<Value, ProtocolError> {
     }
     args.push("--password-stdin".to_string());
     call_cli_tool(arguments, args, Some(password))
+}
+
+fn call_auth_login(arguments: &Value) -> Result<Value, ProtocolError> {
+    call_cli_tool(arguments, auth_login_args(arguments)?, None)
+}
+
+fn auth_login_args(arguments: &Value) -> Result<Vec<String>, ProtocolError> {
+    let name = required_string(arguments, "name")?;
+    let mut args = vec!["auth".to_string(), "login".to_string(), name];
+    for (key, flag) in [
+        ("credentialProvider", "--credential-provider"),
+        ("item", "--item"),
+        ("url", "--url"),
+        ("usernameSelector", "--username-selector"),
+        ("passwordSelector", "--password-selector"),
+        ("submitSelector", "--submit-selector"),
+    ] {
+        if let Some(value) = optional_string(arguments, key)? {
+            if !value.is_empty() {
+                args.push(flag.to_string());
+                args.push(value);
+            }
+        }
+    }
+    Ok(args)
 }
 
 fn call_state_clear(arguments: &Value) -> Result<Value, ProtocolError> {
@@ -4285,6 +4318,41 @@ mod tests {
                 "command.run",
                 "--global",
                 "--no-manifest",
+            ]
+        );
+    }
+
+    #[test]
+    fn auth_login_args_mirror_credential_provider_cli_flags() {
+        let args = auth_login_args(&json!({
+            "name": "naver.com",
+            "credentialProvider": "xgen-vault",
+            "item": "account-1",
+            "url": "https://nid.naver.com/nidlogin.login",
+            "usernameSelector": "#id",
+            "passwordSelector": "#pw",
+            "submitSelector": "button[type=submit]",
+        }))
+        .unwrap();
+
+        assert_eq!(
+            args,
+            vec![
+                "auth",
+                "login",
+                "naver.com",
+                "--credential-provider",
+                "xgen-vault",
+                "--item",
+                "account-1",
+                "--url",
+                "https://nid.naver.com/nidlogin.login",
+                "--username-selector",
+                "#id",
+                "--password-selector",
+                "#pw",
+                "--submit-selector",
+                "button[type=submit]",
             ]
         );
     }

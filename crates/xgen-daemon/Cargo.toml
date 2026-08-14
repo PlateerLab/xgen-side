@@ -1,0 +1,11 @@
+[package]
+name = "xgen-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "Trusted local process host for XGEN Side"
+license = "Apache-2.0"
+
+[dependencies]
+getrandom = "0.2"
+serde_json = "1.0"
+xgen-core = { path = "../xgen-core" }

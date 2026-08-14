@@ -1,7 +1,7 @@
 {
   "name": "agent-browser",
   "version": "0.33.2",
-  "description": "XGEN Side — a Windows-first, skill-routed AI browser",
+  "description": "XGEN Side — a cross-platform, skill-routed AI browser",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.1.3",
@@ -25,9 +25,15 @@
     "version": "npm run version:sync && git add cli/Cargo.toml",
     "build:native": "npm run version:sync && cargo build --release --manifest-path cli/Cargo.toml && node scripts/copy-native.js",
     "postinstall": "node scripts/postinstall.js",
-    "dev:xgen-side": "node scripts/xgen-side.mjs dev",
-    "build:xgen-side": "node scripts/xgen-side.mjs build",
-    "test:xgen-side": "node scripts/xgen-side.mjs test",
+    "build:xgen-core": "node scripts/build-xgen-core.mjs",
+    "test:xgen-core": "node scripts/build-xgen-core.mjs test",
+    "test:xgen-core-relay": "node scripts/test-xgen-core-relay.mjs",
+    "dev:xgen-side": "pnpm run build:xgen-core && node scripts/xgen-side.mjs dev",
+    "build:xgen-side": "pnpm run build:xgen-core && node scripts/xgen-side.mjs build",
+    "package:xgen-side:dir": "pnpm run build:xgen-side && pnpm --dir apps/desktop package:dir",
+    "package:xgen-side:mac": "pnpm run build:xgen-side && pnpm --dir apps/desktop package:mac",
+    "package:xgen-side:win": "pnpm run build:xgen-side && pnpm --dir apps/desktop package:win",
+    "test:xgen-side": "pnpm run test:xgen-core && node scripts/xgen-side.mjs test",
     "typecheck:xgen-side": "node scripts/xgen-side.mjs typecheck"
   },
   "keywords": [

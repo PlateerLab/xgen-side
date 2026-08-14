@@ -26,16 +26,21 @@ import {
   Search24Regular,
   Settings24Regular,
   ShieldLock24Regular,
-  Sparkle24Filled,
   TabDesktop24Regular,
   WeatherMoon24Regular,
   WeatherSunny24Regular,
   Window24Regular,
 } from '@fluentui/react-icons';
-import { type FormEvent, type KeyboardEvent, type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type FormEvent, type KeyboardEvent, type ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { isRunLinkedTab, messagesForAgentTab } from './agent-run-link';
+import { activityLabel } from './activity-label';
+import { chatIdForAgentTab, isRunLinkedTab } from './agent-run-link';
+import { isAuthenticationTab, shouldRevealAgentBrowser } from './browser-auth-handoff';
+import { resolveNewTabIntent } from './new-tab-intent';
+import { messagesForPersistence } from './persisted-chat';
+import { NewTabSurface, type NewTabMode } from './screens/new-tab-surface';
+import { browserTabTitle, promptTitle } from './session-labels';
 import type {
   AgentMode,
   AgentPermissionMode,
@@ -49,16 +54,21 @@ import type {
   BrowserTabState,
   EngineStatus,
   LocalDataStatus,
+  LocalAttachment,
+  LocalArtifact,
   LocalMarkdownFile,
+  PersistedChatMessage,
+  PersistedRunOverview,
   ProviderId,
   ProviderStatus,
+  ReasoningEffort,
   SkillCatalogEntry,
   SkillRoute,
 } from '../../shared/contracts';
 
 type Theme = 'light' | 'dark';
 type Surface = 'home' | 'browser' | 'settings';
-type SettingsSection = 'general' | 'auto-login' | 'providers' | 'mcp' | 'skills' | 'data';
+type SettingsSection = 'general' | 'auto-login' | 'providers' | 'mcp' | 'skills' | 'permissions' | 'data';
 
 interface SkillDefinition extends SkillCatalogEntry {
   enabled: boolean;
@@ -79,35 +89,24 @@ interface ChatSession {
   time: string;
 }
 
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  meta?: string;
+interface PendingApproval {
+  action: string;
+  approvalId: string;
+  chatId?: string;
+  detail?: string;
+  runId: string;
+  scope: 'chat' | 'page';
+}
+
+interface ChatMessage extends PersistedChatMessage {
   runId?: string;
-  overview?: {
+  overview?: PersistedRunOverview & {
     runId?: string;
-    sessionId?: string;
-    browserTabId?: string;
-    route: SkillRoute;
-    status: 'running' | 'completed' | 'failed' | 'cancelled';
-    prompt: string;
-    activity?: string;
-    activities?: Array<{
-      id: string;
-      name: string;
-      phase: 'started' | 'updated' | 'completed' | 'failed';
-      detail?: string;
-    }>;
-    snapshots?: BrowserSnapshot[];
   };
 }
 
 const initialChats: ChatSession[] = [
-  { id: 'chat-1', title: '새로운 AI 브라우저 구조 정리', time: '방금' },
-  { id: 'chat-2', title: '고속도로 교통 상황 요약', time: '오전 9:18' },
-  { id: 'chat-3', title: '문서 비교와 핵심 차이', time: '어제' },
-  { id: 'chat-4', title: 'Windows 자동화 계획', time: '5월 30일' },
+  { id: 'new-chat', title: 'New Chat', time: '' },
 ];
 
 const homeModes: Array<{ id: AgentMode; label: string }> = [
@@ -155,7 +154,7 @@ function groupSkillCatalog(catalog: SkillCatalogEntry[], enabled: Record<string,
 export function App(): ReactElement {
   const [tabs, setTabs] = useState<BrowserTabState[]>([]);
   const [surface, setSurface] = useState<Surface>('home');
-  const [theme, setTheme] = useState<Theme>('light');
+  const [theme, setTheme] = useState<Theme>('dark');
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(false);
   const [sourcePreviewOpen, setSourcePreviewOpen] = useState(false);
@@ -164,17 +163,22 @@ export function App(): ReactElement {
   const [authenticatingProviderId, setAuthenticatingProviderId] = useState<ProviderId | null>(null);
   const [providerId, setProviderId] = useState<ProviderId>('codex');
   const [model, setModel] = useState('gpt-5.6-sol');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high');
   const [homeMode, setHomeMode] = useState<AgentMode>('auto');
   const [homeSelectedSkillId, setHomeSelectedSkillId] = useState('');
   const [pageMode, setPageMode] = useState<AgentMode>('auto');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('guard');
   const [pageRoute, setPageRoute] = useState<SkillRoute>();
   const [homePrompt, setHomePrompt] = useState('');
+  const [homeAttachments, setHomeAttachments] = useState<LocalAttachment[]>([]);
+  const [attachmentMessage, setAttachmentMessage] = useState('');
   const [pagePrompt, setPagePrompt] = useState('');
+  const [newTabMode, setNewTabMode] = useState<NewTabMode>('search');
+  const [newTabValue, setNewTabValue] = useState('');
   const [homeBusy, setHomeBusy] = useState(false);
   const [runningChatId, setRunningChatId] = useState<string>();
   const [pageBusy, setPageBusy] = useState(false);
-  const [homeMessages, setHomeMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [pageMessages, setPageMessages] = useState<ChatMessage[]>([
     {
       id: 'page-answer-1',
@@ -183,32 +187,36 @@ export function App(): ReactElement {
     },
   ]);
   const [chats, setChats] = useState(initialChats);
-  const [activeChatId, setActiveChatId] = useState('chat-1');
+  const [activeChatId, setActiveChatId] = useState('new-chat');
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval>();
   const [engine, setEngine] = useState<EngineStatus>();
   const [localData, setLocalData] = useState<LocalDataStatus>();
   const [settingsMessage, setSettingsMessage] = useState('');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [credentialStatus, setCredentialStatus] = useState<CredentialVaultStatus>();
   const [credentials, setCredentials] = useState<CredentialSummary[]>([]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('general');
-  const [settingsSearch, setSettingsSearch] = useState('');
+  const [settingsReturnSurface, setSettingsReturnSurface] = useState<Exclude<Surface, 'settings'>>('home');
   const [skillSearch, setSkillSearch] = useState('');
   const [skillDomains, setSkillDomains] = useState<SkillDomain[]>([]);
   const [mcpEnabled, setMcpEnabled] = useState<Record<string, boolean>>({ browser: true, xgen: true, filesystem: false });
   const [preferences, setPreferences] = useState(initialPreferences);
   const [browserPermissions, setBrowserPermissions] = useState<AppSettings['browserPermissions']>({ upload: 'ask', download: 'ask' });
   const [settingsReady, setSettingsReady] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const homeRunRef = useRef<AgentRunHandle | null>(null);
   const pageRunRef = useRef<AgentRunHandle | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.active), [tabs]);
+  const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0];
+  const homeMessages = chatMessages[activeChatId] ?? [];
   const selectedProvider = providers.find((provider) => provider.id === providerId);
   const selectableSkills = useMemo(() => skillDomains.flatMap((domain) => domain.skills).filter((skill) => skill.enabled), [skillDomains]);
-  const homeOverview = [...homeMessages].reverse().find((message) => message.overview)?.overview;
-  const activeAgentMessages = messagesForAgentTab([...homeMessages, ...pageMessages], activeTab);
-  const activeAgentOverview = activeAgentMessages.find((message) => message.overview)?.overview;
-  const leftWidth = leftOpen ? 300 : 0;
-  const homeSnapshotVisible = surface === 'home' && !sourcePreviewOpen && Boolean(homeOverview?.route.browserVisible);
+  const linkedAgentChatId = chatIdForAgentTab(chatMessages, activeTab);
+  const linkedAgentMessages = linkedAgentChatId ? chatMessages[linkedAgentChatId] ?? [] : [];
+  const leftWidth = leftOpen ? 220 : 0;
+  const isBlankBrowserTab = surface === 'browser' && (!activeTab || activeTab.url === 'about:blank');
   const homeSourcePreviewVisible = surface === 'home' && sourcePreviewOpen && Boolean(activeTab);
-  const homeDockWidth = homeSnapshotVisible || homeSourcePreviewVisible ? 540 : 0;
+  const homeDockWidth = homeSourcePreviewVisible ? 540 : 0;
   const rightWidth = surface === 'browser' && rightOpen ? 372 : 0;
 
   useEffect(() => {
@@ -217,6 +225,12 @@ export function App(): ReactElement {
     void refreshProviders();
     void window.xgenSide.localData.status().then(setLocalData);
     void refreshCredentials();
+    void window.xgenSide.workspace.load().then((saved) => {
+      setChats(saved.chats);
+      setChatMessages(saved.chatMessages);
+      setActiveChatId(saved.activeChatId);
+      setWorkspaceReady(true);
+    }).catch(() => setWorkspaceReady(true));
     void Promise.all([window.xgenSide.settings.load(), window.xgenSide.skills.list()]).then(([saved, catalog]) => {
       setPreferences(saved.general);
       setPermissionMode(saved.general.defaultPermissionMode);
@@ -237,18 +251,27 @@ export function App(): ReactElement {
     return () => window.clearTimeout(timer);
   }, [browserPermissions, mcpEnabled, preferences, settingsReady, skillDomains]);
 
-  useEffect(() => setAddress(activeTab?.url ?? ''), [activeTab?.url]);
+  useEffect(() => {
+    if (!workspaceReady) return;
+    const persistedMessages = messagesForPersistence(chatMessages);
+    const timer = window.setTimeout(() => {
+      void window.xgenSide.workspace.saveChats({ activeChatId, chats, chatMessages: persistedMessages });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [activeChatId, chatMessages, chats, workspaceReady]);
+
+  useEffect(() => setAddress(activeTab?.url === 'about:blank' ? '' : activeTab?.url ?? ''), [activeTab?.url]);
 
   useEffect(() => {
     void window.xgenSide.browser.setLayout({
-      visible: surface === 'browser' || homeSourcePreviewVisible,
+      visible: (surface === 'browser' && !isBlankBrowserTab) || homeSourcePreviewVisible,
       leftWidth,
       rightWidth: homeSourcePreviewVisible ? 540 : rightWidth,
-      chromeHeight: 76,
+      chromeHeight: 48,
       placement: homeSourcePreviewVisible ? 'right-dock' : 'workspace',
       dockInset: 10,
     });
-  }, [homeSourcePreviewVisible, leftWidth, rightWidth, surface]);
+  }, [homeSourcePreviewVisible, isBlankBrowserTab, leftWidth, rightWidth, surface]);
 
   useEffect(() => {
     if (!authenticatingProviderId) return;
@@ -304,9 +327,22 @@ export function App(): ReactElement {
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
     const result = await window.xgenSide.credentials.autofill(id, activeTab.id);
     if (result.state !== 'filled') {
+      setSettingsReturnSurface('browser');
       setSurface('settings');
       throw new Error(credentialAutofillMessage(result.state));
     }
+  }
+
+  function openSettings(section?: SettingsSection): void {
+    if (surface !== 'settings') setSettingsReturnSurface(surface);
+    if (section) setSettingsSection(section);
+    setSurface('settings');
+    setRightOpen(false);
+    setProfileMenuOpen(false);
+  }
+
+  function closeSettings(): void {
+    setSurface(settingsReturnSurface);
   }
 
   async function refreshProviders(): Promise<ProviderStatus[]> {
@@ -331,17 +367,51 @@ export function App(): ReactElement {
     setModel(next?.models[0]?.id ?? '');
   }
 
-  function createChat(): void {
-    const id = crypto.randomUUID();
-    setChats((current) => [{ id, title: '새 대화', time: '방금' }, ...current]);
+  function updateChatMessages(chatId: string, update: (messages: ChatMessage[]) => ChatMessage[]): void {
+    setChatMessages((current) => ({ ...current, [chatId]: update(current[chatId] ?? []) }));
+  }
+
+  function openChat(id: string): void {
     setActiveChatId(id);
-    setHomeMessages([]);
     setSurface('home');
     setRightOpen(false);
     setSourcePreviewOpen(false);
   }
 
+  function closeChat(id: string): void {
+    if (runningChatId === id) return;
+    const remaining = chats.filter((chat) => chat.id !== id);
+    if (!remaining.length) {
+      const replacement = { id: crypto.randomUUID(), title: 'New Chat', time: '' };
+      setChats([replacement]);
+      setChatMessages({ [replacement.id]: [] });
+      openChat(replacement.id);
+      return;
+    }
+    setChats(remaining);
+    setChatMessages((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    const nextActive = remaining[0];
+    if (activeChatId === id && nextActive) openChat(nextActive.id);
+  }
+
+  function createChat(initialTitle = 'New Chat'): string {
+    const id = crypto.randomUUID();
+    setChats((current) => [{ id, title: initialTitle, time: '방금' }, ...current]);
+    setChatMessages((current) => ({ ...current, [id]: [] }));
+    setActiveChatId(id);
+    setSurface('home');
+    setRightOpen(false);
+    setSourcePreviewOpen(false);
+    return id;
+  }
+
   async function createBrowserTab(): Promise<void> {
+    setNewTabMode('search');
+    setNewTabValue('');
     setTabs(await window.xgenSide.browser.newTab());
     setSourcePreviewOpen(false);
     setSurface('browser');
@@ -353,7 +423,20 @@ export function App(): ReactElement {
     setTabs(nextTabs);
     setSourcePreviewOpen(false);
     setSurface('browser');
-    if (isRunLinkedTab(nextTabs.find((tab) => tab.id === id))) setRightOpen(true);
+    const nextTab = nextTabs.find((tab) => tab.id === id);
+    if (isRunLinkedTab(nextTab)) {
+      const linkedChatId = chatIdForAgentTab(chatMessages, nextTab);
+      if (linkedChatId) setActiveChatId(linkedChatId);
+      setRightOpen(true);
+    } else setRightOpen(false);
+  }
+
+  async function revealAgentBrowser(id: string): Promise<void> {
+    const nextTabs = await window.xgenSide.browser.activateTab(id);
+    setTabs(nextTabs);
+    setSourcePreviewOpen(false);
+    setRightOpen(false);
+    setSurface('browser');
   }
 
   async function openSourcePreview(url: string): Promise<void> {
@@ -382,31 +465,84 @@ export function App(): ReactElement {
     setTabs(await window.xgenSide.browser.navigate(address));
   }
 
+  async function submitNewTab(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const intent = resolveNewTabIntent(newTabMode, newTabValue);
+    if (intent.kind === 'none') return;
+    if (intent.kind === 'ask') {
+      const chatId = createChat(promptTitle(intent.prompt));
+      setHomeMode('auto');
+      setNewTabValue('');
+      if (homeBusy) {
+        setHomePrompt(intent.prompt);
+        return;
+      }
+      void runHomePrompt(intent.prompt, chatId, [], []);
+      return;
+    }
+    setAddress(intent.query);
+    setNewTabValue('');
+    setTabs(activeTab
+      ? await window.xgenSide.browser.navigate(intent.query)
+      : await window.xgenSide.browser.newTab(intent.query));
+  }
+
   async function sendHomeMessage(event: FormEvent): Promise<void> {
     event.preventDefault();
     const value = homePrompt.trim();
     if (!value || homeBusy) return;
-    setHomeMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }]);
+    const attachments = homeAttachments;
     setHomePrompt('');
+    setHomeAttachments([]);
+    setAttachmentMessage('');
+    await runHomePrompt(value, activeChatId, homeMessages, attachments);
+  }
+
+  async function sendLinkedAgentMessage(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    const value = homePrompt.trim();
+    if (!value || homeBusy) return;
+    setHomePrompt('');
+    await runHomePrompt(value, activeChatId, homeMessages, [], 'current-tab', 'browser-agent');
+  }
+
+  async function runHomePrompt(
+    value: string,
+    chatId: string,
+    history: ChatMessage[],
+    attachments: LocalAttachment[] = [],
+    browserTarget: 'new-agent-tab' | 'current-tab' = 'new-agent-tab',
+    modeOverride?: AgentMode,
+  ): Promise<void> {
+    updateChatMessages(chatId, (current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value, attachments }]);
+    setChats((current) => current.map((chat) => chat.id === chatId && (chat.title === 'New Chat' || chat.title === '새 대화')
+      ? { ...chat, title: promptTitle(value), time: '방금' }
+      : chat));
     setHomeBusy(true);
-    setRunningChatId(activeChatId);
-    const request = {
-      providerId,
-      model,
-      mode: homeMode,
-      reasoningEffort: 'auto' as const,
-      prompt: value,
-      history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
-      selectedSkillIds: homeSelectedSkillId ? [homeSelectedSkillId] : undefined,
-      sourceSurface: 'chat' as const,
-      browserTarget: 'new-agent-tab' as const,
-      permissionMode,
-    };
+    setRunningChatId(chatId);
     let overviewId: string | undefined;
     const responseId = crypto.randomUUID();
     let activeRunId: string | undefined;
     let route: SkillRoute | undefined;
     try {
+      const pageContext = browserTarget === 'current-tab'
+        ? await window.xgenSide.browser.getPageContext()
+        : undefined;
+      if (browserTarget === 'current-tab' && !pageContext) throw new Error('현재 Agent 브라우저 탭을 읽을 수 없습니다.');
+      const request = {
+        providerId,
+        model,
+        mode: modeOverride ?? homeMode,
+        reasoningEffort,
+        prompt: value,
+        history: history.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
+        selectedSkillIds: homeSelectedSkillId ? [homeSelectedSkillId] : undefined,
+        sourceSurface: browserTarget === 'current-tab' ? 'browser-side' as const : 'chat' as const,
+        browserTarget,
+        pageContext,
+        permissionMode,
+        attachments: attachments.length ? attachments : undefined,
+      };
       const routed = await window.xgenSide.skills.route(request);
       route = routed;
       overviewId = crypto.randomUUID();
@@ -416,21 +552,23 @@ export function App(): ReactElement {
         content: '',
         overview: { route: routed, status: 'running', prompt: value },
       }];
-      setHomeMessages((current) => [...current,
+      updateChatMessages(chatId, (current) => [...current,
         ...overviewMessages,
         { id: responseId, role: 'assistant', content: '', meta: '실행 준비 중' },
       ]);
       let handle: AgentRunHandle;
       handle = window.xgenSide.agent.start(request, (runEvent) => {
-        setHomeMessages((current) => applyRunEvent(current, responseId, overviewId, runEvent));
+        updateChatMessages(chatId, (current) => applyRunEvent(current, responseId, overviewId, runEvent));
+        if (shouldRevealAgentBrowser(routed, runEvent)) {
+          void revealAgentBrowser(runEvent.tab.id);
+        }
         if (runEvent.type === 'approval-required') {
-          const allowed = window.confirm(`${runEvent.action} 작업을 허용할까요?\n\n${runEvent.detail ?? ''}`);
-          void handle.respondToApproval(runEvent.approvalId, allowed ? 'allow' : 'deny');
+          setPendingApproval({ action: runEvent.action, approvalId: runEvent.approvalId, chatId, detail: runEvent.detail, runId: handle.id, scope: 'chat' });
         }
       });
       homeRunRef.current = handle;
       activeRunId = handle.id;
-      setHomeMessages((current) => current.map((message) => {
+      updateChatMessages(chatId, (current) => current.map((message) => {
         if (message.id === responseId) return { ...message, runId: handle.id };
         if (overviewId && message.id === overviewId && message.overview) {
           return { ...message, overview: { ...message.overview, runId: handle.id } };
@@ -438,7 +576,7 @@ export function App(): ReactElement {
         return message;
       }));
       const result = await handle.result;
-      setHomeMessages((current) => current.map((message) => overviewId && message.id === overviewId ? {
+      updateChatMessages(chatId, (current) => current.map((message) => overviewId && message.id === overviewId ? {
         ...message,
         overview: {
           ...message.overview,
@@ -448,19 +586,20 @@ export function App(): ReactElement {
           browserTabId: result.browserTabId ?? message.overview?.browserTabId,
         },
       } : message));
-      setHomeMessages((current) => current.map((message) => message.id === responseId ? {
+      updateChatMessages(chatId, (current) => current.map((message) => message.id === responseId ? {
         ...message,
         content: result.answer || message.content || result.error || '응답이 없습니다.',
         meta: `${runStateLabel(result.state)} · 로컬 기록 ${result.sessionId.slice(0, 8)}`,
+        artifacts: result.artifacts,
       } : message));
     } catch (error) {
       if (route) {
-        setHomeMessages((current) => current.map((message) => overviewId && message.id === overviewId && message.overview ? {
+        updateChatMessages(chatId, (current) => current.map((message) => overviewId && message.id === overviewId && message.overview ? {
           ...message,
           overview: { ...message.overview, status: 'failed' },
         } : message));
       }
-      setHomeMessages((current) => current.some((message) => message.id === responseId)
+      updateChatMessages(chatId, (current) => current.some((message) => message.id === responseId)
         ? current.map((message) => message.id === responseId ? {
           ...message,
           content: error instanceof Error ? error.message : String(error),
@@ -469,9 +608,32 @@ export function App(): ReactElement {
         : [...current, errorMessage(error)]);
     } finally {
       if (homeRunRef.current?.id === activeRunId) homeRunRef.current = null;
+      setPendingApproval((current) => current?.runId === activeRunId ? undefined : current);
       setHomeBusy(false);
       setRunningChatId(undefined);
     }
+  }
+
+  async function pickHomeAttachments(): Promise<void> {
+    if (homeBusy) return;
+    try {
+      const picked = await window.xgenSide.files.pick();
+      const existingIds = new Set(homeAttachments.map((attachment) => attachment.id));
+      const unique = picked.filter((attachment) => !existingIds.has(attachment.id));
+      const available = Math.max(0, 10 - homeAttachments.length);
+      const accepted = unique.slice(0, available);
+      const rejected = unique.slice(available);
+      if (rejected.length) await Promise.all(rejected.map((attachment) => window.xgenSide.files.discard(attachment.id)));
+      setHomeAttachments((current) => [...current, ...accepted]);
+      setAttachmentMessage(rejected.length ? '한 번에 최대 10개 파일을 첨부할 수 있습니다.' : '');
+    } catch (error) {
+      setAttachmentMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function removeHomeAttachment(id: string): Promise<void> {
+    setHomeAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    await window.xgenSide.files.discard(id);
   }
 
   async function sendPageMessage(event: FormEvent): Promise<void> {
@@ -492,7 +654,7 @@ export function App(): ReactElement {
         providerId,
         model,
         mode: pageMode,
-        reasoningEffort: 'auto' as const,
+        reasoningEffort,
         prompt: value,
         pageContext,
         history: pageMessages.map(({ role, content }) => ({ role, content })),
@@ -511,8 +673,7 @@ export function App(): ReactElement {
       handle = window.xgenSide.agent.start(request, (runEvent) => {
         setPageMessages((current) => applyRunEvent(current, responseId, overviewId, runEvent));
         if (runEvent.type === 'approval-required') {
-          const allowed = window.confirm(`${runEvent.action} 작업을 허용할까요?\n\n${runEvent.detail ?? ''}`);
-          void handle.respondToApproval(runEvent.approvalId, allowed ? 'allow' : 'deny');
+          setPendingApproval({ action: runEvent.action, approvalId: runEvent.approvalId, detail: runEvent.detail, runId: handle.id, scope: 'page' });
         }
       });
       pageRunRef.current = handle;
@@ -554,6 +715,7 @@ export function App(): ReactElement {
         : [...current, errorMessage(error)]);
     } finally {
       if (pageRunRef.current?.id === activeRunId) pageRunRef.current = null;
+      setPendingApproval((current) => current?.runId === activeRunId ? undefined : current);
       setPageBusy(false);
     }
   }
@@ -563,9 +725,11 @@ export function App(): ReactElement {
     if (!handle || !await handle.cancel()) return;
     homeRunRef.current = null;
     setHomeBusy(false);
-    setHomeMessages((current) => current.map((message) => message.overview?.status === 'running'
+    if (runningChatId) updateChatMessages(runningChatId, (current) => current.map((message) => message.overview?.status === 'running'
       ? { ...message, overview: { ...message.overview, status: 'cancelled', activity: '사용자가 실행을 중지했습니다' } }
       : message));
+    setPendingApproval((current) => current?.runId === handle.id ? undefined : current);
+    setRunningChatId(undefined);
   }
 
   async function cancelPageRun(): Promise<void> {
@@ -573,11 +737,20 @@ export function App(): ReactElement {
     if (!handle || !await handle.cancel()) return;
     pageRunRef.current = null;
     setPageBusy(false);
+    setPendingApproval((current) => current?.runId === handle.id ? undefined : current);
     setPageMessages((current) => current.map((message) => message.meta?.includes('실행')
       ? { ...message, meta: '중지됨' }
       : message.overview?.status === 'running'
         ? { ...message, overview: { ...message.overview, status: 'cancelled', activity: '사용자가 실행을 중지했습니다' } }
         : message));
+  }
+
+  async function resolveApproval(decision: 'allow' | 'deny'): Promise<void> {
+    const approval = pendingApproval;
+    if (!approval) return;
+    const handle = approval.scope === 'chat' ? homeRunRef.current : pageRunRef.current;
+    if (handle?.id === approval.runId) await handle.respondToApproval(approval.approvalId, decision);
+    setPendingApproval((current) => current?.approvalId === approval.approvalId ? undefined : current);
   }
 
   async function connectProvider(id: ProviderId): Promise<void> {
@@ -595,23 +768,22 @@ export function App(): ReactElement {
 
   return (
     <main className="app-shell" data-theme={theme} data-compact={preferences.compact ? 'true' : 'false'}>
-      {leftOpen ? (
+      {surface !== 'settings' && (leftOpen ? (
         <LeftPanel
           activeChatId={activeChatId}
           chats={chats}
           engine={engine}
           onClose={() => setLeftOpen(false)}
+          onCloseChat={closeChat}
           onCloseBrowser={(id) => void closeBrowserTab(id)}
           onCreateBrowser={() => void createBrowserTab()}
-          onCreateChat={createChat}
+          onCreateChat={() => createChat()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
-          onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); setRightOpen(false); }}
-          onOpenSettings={() => { setSurface('settings'); setRightOpen(false); }}
-          onChangeSettingsSection={setSettingsSection}
-          onSettingsSearch={setSettingsSearch}
+          onOpenChat={openChat}
+          onOpenSettings={() => openSettings()}
+          onToggleProfile={() => setProfileMenuOpen((current) => !current)}
           onToggleTheme={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}
-          settingsSearch={settingsSearch}
-          settingsSection={settingsSection}
+          profileMenuOpen={profileMenuOpen}
           runningChatId={runningChatId}
           surface={surface}
           tabs={tabs}
@@ -619,7 +791,7 @@ export function App(): ReactElement {
         />
       ) : (
         <button className="panel-reopen panel-reopen-left" onClick={() => setLeftOpen(true)} aria-label="왼쪽 패널 열기"><PanelLeftExpand24Regular /></button>
-      )}
+      ))}
 
       {surface === 'home' && (
         <HomeSurface
@@ -627,18 +799,24 @@ export function App(): ReactElement {
           chats={chats}
           leftWidth={leftWidth}
           messages={homeMessages}
+          attachments={homeAttachments}
+          attachmentMessage={attachmentMessage}
           mode={homeMode}
           model={model}
+          reasoningEffort={reasoningEffort}
           permissionMode={permissionMode}
           onChangeMode={setHomeMode}
           onChangePermissionMode={changePermissionMode}
           onChangeModel={setModel}
+          onChangeReasoningEffort={setReasoningEffort}
           onChangePrompt={setHomePrompt}
           onChangeProvider={changeProvider}
+          onPickAttachments={() => void pickHomeAttachments()}
+          onRemoveAttachment={(id) => void removeHomeAttachment(id)}
           onCancel={() => void cancelHomeRun()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
           onOpenSource={(url) => void openSourcePreview(url)}
-          onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
+          onOpenChat={openChat}
           onSubmit={(event) => void sendHomeMessage(event)}
           prompt={homePrompt}
           providerId={providerId}
@@ -649,10 +827,8 @@ export function App(): ReactElement {
           selectedSkillId={homeSelectedSkillId}
           onChangeSelectedSkill={setHomeSelectedSkillId}
           tabs={tabs}
+          title={activeChat?.title ?? 'New Chat'}
         />
-      )}
-      {surface === 'home' && homeSnapshotVisible && homeOverview && (
-        <BrowserSnapshotRail busy={homeBusy} overview={homeOverview} onOpenBrowser={(id) => void openBrowserTab(id)} />
       )}
       {homeSourcePreviewVisible && activeTab && (
         <SourcePreviewDock
@@ -669,14 +845,16 @@ export function App(): ReactElement {
       {surface === 'settings' && (
         <SettingsSurface
           activeSection={settingsSection}
+          authenticatingProviderId={authenticatingProviderId}
           browserPermissions={browserPermissions}
           credentialStatus={credentialStatus}
           credentials={credentials}
-          leftWidth={leftWidth}
           localData={localData}
           mcpEnabled={mcpEnabled}
           message={settingsMessage}
+          onBack={closeSettings}
           onConnect={(id) => void connectProvider(id)}
+          onChangeSection={setSettingsSection}
           onAutofillCredential={(id) => void autofillCredential(id).catch((error) => setSettingsMessage(error instanceof Error ? error.message : String(error)))}
           onRemoveCredential={(id) => void removeCredential(id).catch((error) => setSettingsMessage(error instanceof Error ? error.message : String(error)))}
           onSaveCredential={(request) => saveCredential(request)}
@@ -712,20 +890,57 @@ export function App(): ReactElement {
           rightWidth={rightWidth}
         />
       )}
+      {isBlankBrowserTab && (
+        <NewTabSurface
+          leftWidth={leftWidth}
+          mode={newTabMode}
+          onChangeMode={setNewTabMode}
+          onChangeValue={setNewTabValue}
+          onOpenSettings={() => openSettings('skills')}
+          onSubmit={(event) => void submitNewTab(event)}
+          onUsePrompt={(prompt) => { setNewTabMode('ask'); setNewTabValue(prompt); }}
+          value={newTabValue}
+        />
+      )}
 
       {surface === 'browser' && rightOpen && (
         <AgentPanel
           activeTab={activeTab}
           activeRoute={pageRoute}
           busy={pageBusy}
-          linkedMessages={activeAgentMessages}
+          linkedMessages={linkedAgentMessages}
+          linkedConversation={{
+            busy: homeBusy,
+            messages: linkedAgentMessages,
+            mode: homeMode,
+            model,
+            reasoningEffort,
+            permissionMode,
+            onChangeMode: setHomeMode,
+            onChangePermissionMode: changePermissionMode,
+            onChangeModel: setModel,
+            onChangeReasoningEffort: setReasoningEffort,
+            onChangePrompt: setHomePrompt,
+            onChangeProvider: changeProvider,
+            onCancel: () => void cancelHomeRun(),
+            onSubmit: (event) => void sendLinkedAgentMessage(event),
+            prompt: homePrompt,
+            providerId,
+            providers,
+            selectedProvider,
+            skills: selectableSkills,
+            selectedSkillId: homeSelectedSkillId,
+            onChangeSelectedSkill: setHomeSelectedSkillId,
+          }}
           messages={pageMessages}
           mode={pageMode}
           model={model}
+          reasoningEffort={reasoningEffort}
           permissionMode={permissionMode}
           onChangeMode={setPageMode}
           onChangePermissionMode={changePermissionMode}
           onChangeModel={setModel}
+          onChangeReasoningEffort={setReasoningEffort}
           onChangePrompt={setPagePrompt}
           onChangeProvider={changeProvider}
           onCancel={() => void cancelPageRun()}
@@ -741,6 +956,12 @@ export function App(): ReactElement {
           selectedProvider={selectedProvider}
         />
       )}
+      {pendingApproval && (
+        <ApprovalPrompt
+          approval={pendingApproval}
+          onDecision={(decision) => void resolveApproval(decision)}
+        />
+      )}
     </main>
   );
 }
@@ -750,17 +971,16 @@ interface LeftPanelProps {
   chats: ChatSession[];
   engine?: EngineStatus;
   onClose(): void;
+  onCloseChat(id: string): void;
   onCloseBrowser(id: string): void;
   onCreateBrowser(): void;
   onCreateChat(): void;
-  onChangeSettingsSection(value: SettingsSection): void;
   onOpenBrowser(id: string): void;
   onOpenChat(id: string): void;
   onOpenSettings(): void;
-  onSettingsSearch(value: string): void;
+  onToggleProfile(): void;
   onToggleTheme(): void;
-  settingsSearch: string;
-  settingsSection: SettingsSection;
+  profileMenuOpen: boolean;
   runningChatId?: string;
   surface: Surface;
   tabs: BrowserTabState[];
@@ -768,70 +988,54 @@ interface LeftPanelProps {
 }
 
 function LeftPanel(props: LeftPanelProps): ReactElement {
-  const settingsItems: Array<{ id: SettingsSection; label: string; description: string; icon: ReactElement }> = [
-    { id: 'general', label: 'General', description: '앱 동작과 실행 기본값', icon: <Settings24Regular /> },
-    { id: 'auto-login', label: 'Auto login', description: '암호화된 사이트 로그인', icon: <ShieldLock24Regular /> },
-    { id: 'providers', label: 'AI Providers', description: 'Codex와 Claude Code', icon: <BotSparkle24Filled /> },
-    { id: 'mcp', label: 'MCP', description: '로컬 도구와 서버 연결', icon: <PlugConnected24Regular /> },
-    { id: 'skills', label: 'Skills', description: '사이트별 브라우저 능력', icon: <PuzzlePiece24Regular /> },
-    { id: 'data', label: 'Local data', description: '세션 기록과 저장소', icon: <Database24Regular /> },
-  ];
-  const filteredSettingsItems = settingsItems.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(props.settingsSearch.toLowerCase()));
   return (
     <aside className="left-panel glass-panel">
       <header className="left-brand">
-        {props.surface === 'settings' ? (
-          <button className="settings-back" onClick={() => props.onOpenChat(props.activeChatId)} aria-label="앱으로 돌아가기">
-            <ArrowLeft24Regular /><span><strong>Settings</strong><small>앱으로 돌아가기</small></span>
-          </button>
-        ) : (
-          <button className="brand-button" onClick={() => props.onOpenChat(props.activeChatId)} aria-label="XGEN Side 홈">
-            <span className="brand-icon"><BotSparkle24Filled /></span>
-            <span><strong>XGEN Side</strong><small>{props.engine?.available ? 'Browser engine ready' : 'Local workspace'}</small></span>
-          </button>
-        )}
+        <button className="brand-button" onClick={() => props.onOpenChat(props.activeChatId)} aria-label="XGEN Side 홈">
+          <span className="brand-icon"><BotSparkle24Filled /></span>
+          <span><strong>XGEN Side</strong><small>{props.engine?.available ? 'Browser engine ready' : 'Local workspace'}</small></span>
+        </button>
         <button className="icon-button" onClick={props.onClose} aria-label="왼쪽 패널 닫기"><PanelLeftContract24Regular /></button>
       </header>
-      {props.surface === 'settings' ? (
-        <nav className="settings-nav" aria-label="설정 목록">
-          <label className="settings-nav-search"><Search24Regular /><input value={props.settingsSearch} onChange={(event) => props.onSettingsSearch(event.target.value)} placeholder="설정 검색" /></label>
-          <div className="settings-nav-group-title">XGEN Side</div>
-          <div className="settings-nav-list">
-            {filteredSettingsItems.map((item) => (
-              <button className={props.settingsSection === item.id ? 'settings-nav-row active' : 'settings-nav-row'} key={item.id} onClick={() => props.onChangeSettingsSection(item.id)}>
-                <span className="settings-nav-icon">{item.icon}</span>
-                <span><strong>{item.label}</strong><small>{item.description}</small></span>
-                <ChevronRight24Regular />
-              </button>
-            ))}
-          </div>
-          <div className="settings-nav-footnote"><ShieldLock24Regular /><span><strong>Local first</strong><small>인증과 실행 데이터는 이 기기에만 저장됩니다.</small></span></div>
-        </nav>
-      ) : (
       <nav className="session-nav" aria-label="세션 목록">
+        <section className="nav-section bookmark-section">
+          <div className="nav-section-title"><span>Bookmarks</span><ChevronDown24Regular /></div>
+          <button className="bookmark-dropzone" type="button" onClick={props.onCreateBrowser}>탭을 여기로 드래그해 북마크에 추가</button>
+        </section>
         <section className="nav-section">
           <div className="nav-section-title"><span>Chats</span><button className="icon-button compact" onClick={props.onCreateChat} aria-label="새 채팅"><Add24Regular /></button></div>
           <div className="nav-list">
             {props.chats.map((chat) => (
-              <button className={props.surface === 'home' && props.activeChatId === chat.id ? 'nav-row active' : 'nav-row'} key={chat.id} onClick={() => props.onOpenChat(chat.id)}>
-                {props.runningChatId === chat.id
-                  ? <span className="nav-progress-ring" aria-label="채팅 실행 중" />
-                  : props.surface === 'home' && props.activeChatId === chat.id ? <Chat24Filled /> : <Chat24Regular />}
-                <span className="nav-copy"><strong>{chat.title}</strong><small>{chat.time}</small></span>
-              </button>
+              <div className={props.surface === 'home' && props.activeChatId === chat.id ? 'nav-row chat-row active' : 'nav-row chat-row'} key={chat.id}>
+                <button className="nav-row-open" onClick={() => props.onOpenChat(chat.id)} aria-label={chat.title}>
+                  {props.runningChatId === chat.id
+                    ? <span className="nav-progress-ring" aria-label="채팅 실행 중" />
+                    : props.surface === 'home' && props.activeChatId === chat.id ? <Chat24Filled /> : <Chat24Regular />}
+                  <span className="nav-copy"><strong>{chat.title}</strong><small>{chat.time}</small></span>
+                </button>
+                <button className="row-close" disabled={props.runningChatId === chat.id} aria-label="채팅 닫기" onClick={() => props.onCloseChat(chat.id)}><Dismiss24Regular /></button>
+              </div>
             ))}
           </div>
         </section>
         <section className="nav-section browser-session-section">
-          <div className="nav-section-title"><span>Browser tabs</span><button className="icon-button compact" onClick={props.onCreateBrowser} aria-label="새 브라우저 탭"><Add24Regular /></button></div>
+          <div className="nav-section-title"><span>Tabs</span><button className="icon-button compact" onClick={props.onCreateBrowser} aria-label="새 브라우저 탭"><Add24Regular /></button></div>
           <div className="nav-list">
+            {props.surface === 'settings' && (
+              <div className="nav-row browser-tab-row active">
+                <button className="nav-row-open" onClick={props.onOpenSettings} aria-label="Settings">
+                  <Settings24Regular />
+                  <span className="nav-copy"><strong>Settings</strong></span>
+                </button>
+              </div>
+            )}
             {props.tabs.map((tab) => (
-              <div className={props.surface === 'browser' && tab.active ? 'nav-row active' : 'nav-row'} key={tab.id}>
-                <button className="nav-row-open" onClick={() => props.onOpenBrowser(tab.id)} aria-label={tab.title || '새 브라우저 탭'}>
+              <div className={props.surface === 'browser' && tab.active ? 'nav-row browser-tab-row active' : 'nav-row browser-tab-row'} key={tab.id}>
+                <button className="nav-row-open" onClick={() => props.onOpenBrowser(tab.id)} aria-label={browserTabTitle(tab)}>
                   {tab.agentStatus === 'running'
                     ? <span className="nav-progress-ring" aria-label="브라우저 작업 실행 중" />
                     : tab.agentRunId ? <BotSparkle24Filled /> : tab.url.includes('google.com') ? <Globe24Regular /> : <TabDesktop24Regular />}
-                  <span className="nav-copy"><strong>{tab.agentRunId ? `Agent · ${tab.loading ? '불러오는 중' : tab.title || '작업 탭'}` : tab.loading ? '불러오는 중' : tab.title || '새 탭'}</strong><small>{tab.agentRunId ? `${agentStatusLabel(tab.agentStatus)} · ${formatHost(tab.url)}` : formatHost(tab.url)}</small></span>
+                  <span className="nav-copy"><strong>{tab.agentRunId ? `Agent · ${tab.loading ? '불러오는 중' : browserTabTitle(tab)}` : tab.loading ? '불러오는 중' : browserTabTitle(tab)}</strong>{tab.url === 'about:blank' ? null : <small>{tab.agentRunId ? `${agentStatusLabel(tab.agentStatus)} · ${formatHost(tab.url)}` : formatHost(tab.url)}</small>}</span>
                 </button>
                 <button className="row-close" aria-label="브라우저 탭 닫기" onClick={() => props.onCloseBrowser(tab.id)}><Dismiss24Regular /></button>
               </div>
@@ -839,11 +1043,29 @@ function LeftPanel(props: LeftPanelProps): ReactElement {
           </div>
         </section>
       </nav>
-      )}
       <footer className="left-footer">
-        <button className={props.surface === 'settings' ? 'footer-action active' : 'footer-action'} onClick={props.onOpenSettings}><Settings24Regular /><span>Settings</span></button>
+        {props.profileMenuOpen && (
+          <div className="profile-menu" role="menu" aria-label="Profiles">
+            <small className="profile-menu-title">Profiles</small>
+            <button className="profile-menu-account" type="button"><span className="profile-avatar">XS</span><span>XGEN Side</span><CheckmarkCircle24Regular /></button>
+            <button type="button"><Add24Regular /><span>New profile</span></button>
+            <div className="profile-menu-separator" />
+            <button type="button"><PuzzlePiece24Regular /><span>Bookmarks</span><ChevronRight24Regular /></button>
+            <button type="button"><Database24Regular /><span>Downloads</span><ChevronRight24Regular /></button>
+            <button type="button"><PlugConnected24Regular /><span>Extensions</span><ChevronRight24Regular /></button>
+            <button type="button"><History24Regular /><span>History</span><ChevronRight24Regular /></button>
+            <button type="button"><Window24Regular /><span>Developers</span><ChevronRight24Regular /></button>
+            <button type="button" onClick={props.onOpenSettings}><Settings24Regular /><span>Settings</span><small>⌘,</small></button>
+            <div className="profile-menu-separator" />
+            <button type="button" onClick={props.onCreateBrowser}><Add24Regular /><span>New Tab</span><small>⌘T</small></button>
+            <button type="button"><ShieldLock24Regular /><span>Incognito Window</span><small>⇧⌘N</small></button>
+          </div>
+        )}
+        <button className="profile-trigger" onClick={props.onToggleProfile} aria-label="프로필" aria-expanded={props.profileMenuOpen}>
+          <span className="profile-avatar">XS</span><ChevronDown24Regular />
+        </button>
         <button className="icon-button" onClick={props.onToggleTheme} aria-label="테마 전환">
-          {props.theme === 'light' ? <WeatherMoon24Regular /> : <WeatherSunny24Regular />}
+          {props.theme === 'light' ? <WeatherMoon24Regular /> : <Search24Regular />}
         </button>
       </footer>
     </aside>
@@ -855,10 +1077,12 @@ interface ConversationSurfaceProps {
   messages: ChatMessage[];
   mode: AgentMode;
   model: string;
+  reasoningEffort: ReasoningEffort;
   permissionMode: AgentPermissionMode;
   onChangeMode(value: AgentMode): void;
   onChangePermissionMode(value: AgentPermissionMode): void;
   onChangeModel(value: string): void;
+  onChangeReasoningEffort(value: ReasoningEffort): void;
   onChangePrompt(value: string): void;
   onChangeProvider(value: ProviderId): void;
   onCancel(): void;
@@ -870,6 +1094,10 @@ interface ConversationSurfaceProps {
   skills?: SkillDefinition[];
   selectedSkillId?: string;
   onChangeSelectedSkill?(value: string): void;
+  attachments?: LocalAttachment[];
+  attachmentMessage?: string;
+  onPickAttachments?(): void;
+  onRemoveAttachment?(id: string): void;
 }
 
 function HomeSurface(props: ConversationSurfaceProps & {
@@ -880,15 +1108,14 @@ function HomeSurface(props: ConversationSurfaceProps & {
   onOpenChat(id: string): void;
   rightWidth: number;
   tabs: BrowserTabState[];
+  title: string;
 }): ReactElement {
-  const [recentView, setRecentView] = useState<'chats' | 'browsers'>('chats');
   const hasOverview = props.messages.some((message) => message.overview);
   const composer = <Composer {...props} modes={homeModes} placeholder="AI에게 작업을 요청하거나 웹 검색을 시작하세요" />;
   return (
     <section className="home-surface" style={{ left: props.leftWidth, right: props.rightWidth }}>
       <header className="home-header">
-        <h1>{props.messages.length ? 'Chat' : 'New chat'}</h1>
-        <button className="profile-button" aria-label="프로필">XS</button>
+        <div className="chat-title"><Chat24Regular /><h1>{props.title}</h1></div>
       </header>
       <div className={props.messages.length ? 'home-content has-messages' : 'home-content'}>
         {props.messages.length ? (
@@ -901,41 +1128,9 @@ function HomeSurface(props: ConversationSurfaceProps & {
         ) : (
           <div className="home-start">
             <div className="home-hero">
-              <h1>무엇을 도와드릴까요?</h1>
-              <p>대화로 정리하거나, 브라우저 검색으로 최신 정보를 찾아보세요.</p>
+              <span className="home-mark"><BotSparkle24Filled /></span>
             </div>
             {composer}
-            <section className="recent-work" aria-label="최근 작업">
-              <header className="recent-work-header">
-                <div className="recent-tabs" role="tablist" aria-label="최근 작업 종류">
-                  <button className={recentView === 'chats' ? 'active' : ''} onClick={() => setRecentView('chats')} role="tab" aria-selected={recentView === 'chats'}>Chats</button>
-                  <button className={recentView === 'browsers' ? 'active' : ''} onClick={() => setRecentView('browsers')} role="tab" aria-selected={recentView === 'browsers'}>Browsers</button>
-                </div>
-                <span><History24Regular /> 최근 작업</span>
-              </header>
-              <div className="recent-grid">
-                {recentView === 'chats'
-                  ? props.chats.slice(0, 3).map((chat, index) => (
-                    <button className="recent-card" key={chat.id} onClick={() => props.onOpenChat(chat.id)}>
-                      <span className="recent-card-icon"><Chat24Regular /></span>
-                      <small>{chat.time}</small>
-                      <strong>{chat.title}</strong>
-                      <p>{index === 0 ? '이어지는 대화와 실행 기록을 확인하세요.' : '최근 대화를 다시 열어 계속 작업할 수 있습니다.'}</p>
-                      <span className="recent-card-link">대화 열기 <Open24Regular /></span>
-                    </button>
-                  ))
-                  : props.tabs.slice(0, 3).map((tab) => (
-                    <button className="recent-card browser-card" key={tab.id} onClick={() => props.onOpenBrowser(tab.id)}>
-                      <span className="recent-card-icon"><Window24Regular /></span>
-                      <small>{formatHost(tab.url)}</small>
-                      <strong>{tab.title || '새 브라우저 탭'}</strong>
-                      <p>{tab.loading ? '페이지를 불러오는 중입니다.' : '최근 브라우저 작업을 이어서 진행하세요.'}</p>
-                      <span className="recent-card-link">브라우저 열기 <Open24Regular /></span>
-                    </button>
-                  ))}
-                {recentView === 'browsers' && props.tabs.length === 0 && <div className="recent-empty">아직 열린 브라우저가 없습니다.</div>}
-              </div>
-            </section>
           </div>
         )}
       </div>
@@ -967,6 +1162,7 @@ function BrowserChrome(props: {
       <form className="address-form" onSubmit={props.onNavigate}>
         <Globe24Regular /><input aria-label="주소" value={props.address} onChange={(event) => props.onAddressChange(event.target.value)} placeholder="검색어 또는 URL" />
       </form>
+      {isAuthenticationTab(props.activeTab) && <span className="browser-auth-handoff"><ShieldLock24Regular /><span><strong>인증을 이 화면에서 완료하세요</strong><small>QR, passkey 또는 기기 승인을 직접 진행할 수 있습니다.</small></span></span>}
       <button className={props.rightOpen ? 'side-toggle active' : 'side-toggle'} onClick={props.onToggleAgent} aria-pressed={props.rightOpen}>
         <BotSparkle24Filled /><span>XGEN Side</span>
       </button>
@@ -974,17 +1170,56 @@ function BrowserChrome(props: {
   );
 }
 
+function ApprovalPrompt(props: {
+  approval: PendingApproval;
+  onDecision(decision: 'allow' | 'deny'): void;
+}): ReactElement {
+  const isLogin = props.approval.action === 'auth_login';
+  const loginTarget = isLogin ? loginApprovalTarget(props.approval.detail) : undefined;
+  return (
+    <div className="approval-backdrop" role="presentation">
+      <section className="approval-prompt" role="alertdialog" aria-modal="true" aria-labelledby="approval-title" aria-describedby="approval-detail">
+        <span className="approval-icon"><ShieldLock24Regular /></span>
+        <div className="approval-copy">
+          <span>{isLogin ? 'Secure login' : 'Approval required'}</span>
+          <h2 id="approval-title">{isLogin ? '저장된 로그인으로 계속할까요?' : `${props.approval.action} 작업을 허용할까요?`}</h2>
+          <p id="approval-detail">{isLogin ? `${loginTarget ? `${loginTarget}에 ` : ''}OS 암호화 저장소에서 origin이 정확히 일치하는 로그인 한 개를 브라우저에 직접 입력합니다. 비밀번호는 채팅이나 AI 모델에 전달되지 않습니다.` : props.approval.detail || '이 작업은 현재 Guard 권한 범위를 넘어 사용자 확인이 필요합니다.'}</p>
+        </div>
+        <div className="approval-actions">
+          <button type="button" className="approval-deny" onClick={() => props.onDecision('deny')}>{isLogin ? '취소' : 'Deny'}</button>
+          <button type="button" className="approval-allow" onClick={() => props.onDecision('allow')}>{isLogin ? '한 번만 로그인' : 'Allow once'}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function loginApprovalTarget(detail?: string): string | undefined {
+  if (!detail) return undefined;
+  try {
+    const parsed = JSON.parse(detail) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const url = 'url' in parsed && typeof parsed.url === 'string' ? parsed.url : undefined;
+    if (!url) return undefined;
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function AgentPanel(props: ConversationSurfaceProps & {
   activeRoute?: SkillRoute;
   activeTab?: BrowserTabState;
+  linkedConversation: ConversationSurfaceProps;
   linkedMessages: ChatMessage[];
   onCancelLinked(): void;
   onClose(): void;
 }): ReactElement {
-  const linkedOverview = props.linkedMessages.find((message) => message.overview)?.overview;
+  const linkedOverview = [...props.linkedMessages].reverse().find((message) => message.overview)?.overview;
   const isAgentTab = isRunLinkedTab(props.activeTab);
   const effectiveMode = linkedOverview?.route.resolvedMode ?? props.activeRoute?.resolvedMode ?? props.mode;
   const messages = isAgentTab ? props.linkedMessages : props.messages;
+  const composerProps = isAgentTab ? props.linkedConversation : props;
   const modeDescription: Record<AgentMode, string> = {
     auto: '자동 선택 · 요청에 따라 현재 페이지 읽기, 웹 검색, 브라우저 조작을 구분',
     chat: '대화 전용 · 브라우저와 분리',
@@ -995,10 +1230,10 @@ function AgentPanel(props: ConversationSurfaceProps & {
   return (
     <aside className="agent-panel glass-panel">
       <header className="agent-header">
-        <div><span className="agent-title-icon"><BotSparkle24Filled /></span><strong>XGEN Side</strong></div>
+        <div><span className="agent-title-icon"><Chat24Regular /></span><strong>Side chat</strong></div>
         <button className="icon-button" onClick={props.onClose} aria-label="오른쪽 패널 닫기"><PanelRightContract24Regular /></button>
       </header>
-      <div className="page-context">
+      <div className="page-context side-chat-context">
         <div className="context-heading">{isAgentTab ? <BotSparkle24Filled /> : <Document24Regular />}<strong>{isAgentTab ? 'Agent browser' : 'Attached page'}</strong></div>
         <p>{props.activeTab?.title || '현재 페이지'}</p>
         <span><Globe24Regular />{formatHost(props.activeTab?.url)}</span>
@@ -1008,9 +1243,8 @@ function AgentPanel(props: ConversationSurfaceProps & {
         ? messages.map((message) => <MessageBubble key={message.id} message={message} />)
         : <div className="linked-run-empty"><History24Regular /><span><strong>연결된 작업을 불러오는 중</strong><small>일반 채팅의 Agent Run과 동일한 진행 상태를 표시합니다.</small></span></div>}
       </div>
-      {isAgentTab
-        ? <div className="linked-run-controls"><span>{linkedOverview?.status === 'running' ? 'Agent가 이 탭에서 작업 중입니다.' : '이 Agent Run의 실행 기록입니다.'}</span>{linkedOverview?.status === 'running' && <button type="button" onClick={props.onCancelLinked}><Dismiss24Regular />중지</button>}</div>
-        : <Composer {...props} modes={pageModes} placeholder={props.mode === 'page' ? '이 페이지에 대해 질문하세요' : '브라우저에서 수행할 작업을 요청하세요'} />}
+      {isAgentTab && linkedOverview?.status === 'running' && <div className="linked-run-controls"><span>Agent가 이 탭에서 작업 중입니다.</span><button type="button" onClick={props.onCancelLinked}><Dismiss24Regular />중지</button></div>}
+      <Composer {...composerProps} modes={isAgentTab ? homeModes : pageModes} placeholder={isAgentTab ? 'Reply, @ for context' : 'Ask AI a task, @ for context'} />
     </aside>
   );
 }
@@ -1131,13 +1365,15 @@ function CredentialSettings(props: {
 
 function SettingsSurface(props: {
   activeSection: SettingsSection;
+  authenticatingProviderId: ProviderId | null;
   browserPermissions: AppSettings['browserPermissions'];
   credentialStatus?: CredentialVaultStatus;
   credentials: CredentialSummary[];
-  leftWidth: number;
   localData?: LocalDataStatus;
   mcpEnabled: Record<string, boolean>;
   message: string;
+  onBack(): void;
+  onChangeSection(value: SettingsSection): void;
   onConnect(id: ProviderId): void;
   onAutofillCredential(id: string): void;
   onRemoveCredential(id: string): void;
@@ -1158,20 +1394,66 @@ function SettingsSurface(props: {
   const sectionCopy: Record<SettingsSection, { eyebrow: string; title: string; description: string }> = {
     general: { eyebrow: 'XGEN Side', title: 'General', description: '브라우저와 로컬 agent 실행의 기본 동작을 설정합니다.' },
     'auto-login': { eyebrow: 'Private vault', title: 'Auto login', description: 'OS 암호화로 저장한 로그인 정보를 현재 사이트에 직접 입력합니다.' },
-    providers: { eyebrow: 'Models', title: 'AI Providers', description: '공식 로컬 CLI와 구독 계정 연결 상태를 관리합니다.' },
+    providers: { eyebrow: 'Models', title: 'AI', description: '구독 계정과 로컬 AI provider를 연결합니다.' },
     mcp: { eyebrow: 'Tools', title: 'MCP', description: 'agent가 사용할 로컬 도구 서버와 권한 범위를 관리합니다.' },
     skills: { eyebrow: 'Browser intelligence', title: 'Skills', description: '도메인별로 자동 활성화할 브라우저 능력을 선택합니다.' },
+    permissions: { eyebrow: 'Guard', title: 'Permissions', description: '브라우저 파일 전송과 다운로드 승인 정책을 관리합니다.' },
     data: { eyebrow: 'Local first', title: 'Local data', description: '세션 기록과 provider 출력이 저장되는 위치를 확인합니다.' },
   };
   const copy = sectionCopy[props.activeSection];
   const isWorkbench = props.activeSection === 'mcp' || props.activeSection === 'skills' || props.activeSection === 'data';
+  const [connectMenuOpen, setConnectMenuOpen] = useState(false);
+  const [providerMenuId, setProviderMenuId] = useState<ProviderId | null>(null);
+  const [settingsSearch, setSettingsSearch] = useState('');
+  const settingsGroups: Array<{ label: string; items: Array<{ id: SettingsSection; label: string; keywords: string; icon: ReactElement }> }> = [
+    {
+      label: '기본',
+      items: [
+        { id: 'general', label: 'General', keywords: '일반 동작 실행 compact history', icon: <Settings24Regular /> },
+        { id: 'providers', label: 'AI', keywords: 'provider model subscription 구독 연결', icon: <BotSparkle24Filled /> },
+        { id: 'auto-login', label: 'Auto login', keywords: 'account password credential vault 로그인 계정 비밀번호', icon: <ShieldLock24Regular /> },
+      ],
+    },
+    {
+      label: 'Agent',
+      items: [
+        { id: 'skills', label: 'Skills', keywords: 'skill browser document 스킬', icon: <PuzzlePiece24Regular /> },
+        { id: 'mcp', label: 'MCPs', keywords: 'tools server 도구 서버', icon: <PlugConnected24Regular /> },
+        { id: 'permissions', label: 'Permissions', keywords: 'guard upload download 승인 권한', icon: <ShieldLock24Regular /> },
+        { id: 'data', label: 'Local data', keywords: 'memory developer storage logs 로컬 데이터 기록', icon: <Database24Regular /> },
+      ],
+    },
+  ];
+  const searchNeedle = settingsSearch.trim().toLowerCase();
+  const visibleGroups = settingsGroups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => !searchNeedle || `${item.label} ${item.keywords}`.toLowerCase().includes(searchNeedle)),
+  })).filter((group) => group.items.length > 0);
+  const connectedProviders = props.providers.filter((provider) => provider.authenticated || props.authenticatingProviderId === provider.id);
 
   return (
-    <section className="settings-surface" style={{ left: props.leftWidth }}>
-      <header className="settings-topbar"><span>Settings <ChevronRight24Regular /> {copy.title}</span><button className="icon-button" onClick={props.onRefresh} aria-label="상태 새로고침"><ArrowClockwise24Regular /></button></header>
-      <div className={isWorkbench ? 'settings-content settings-workbench-content' : 'settings-content settings-detail-scroll'}>
+    <section className="settings-surface">
+      <div className="settings-shell-layout">
+        <aside className="settings-shell-nav" aria-label="환경설정 메뉴">
+          <button className="settings-app-back" type="button" onClick={props.onBack}><ArrowLeft24Regular /><span>앱으로 돌아가기</span></button>
+          <label className="settings-search"><Search24Regular /><input value={settingsSearch} onChange={(event) => setSettingsSearch(event.target.value)} placeholder="설정 검색..." aria-label="설정 검색" /></label>
+          <nav className="settings-primary-nav">
+            {visibleGroups.map((group) => (
+              <section className="settings-primary-group" key={group.label}>
+                <h2>{group.label}</h2>
+                {group.items.map((item) => (
+                  <button className={props.activeSection === item.id ? 'active' : ''} type="button" key={item.id} onClick={() => props.onChangeSection(item.id)}>{item.icon}<span>{item.label}</span></button>
+                ))}
+              </section>
+            ))}
+            {visibleGroups.length === 0 && <p className="settings-search-empty">일치하는 설정이 없습니다.</p>}
+          </nav>
+          <button className="settings-refresh" type="button" onClick={props.onRefresh}><ArrowClockwise24Regular /><span>연결 상태 새로고침</span></button>
+        </aside>
+        <div className="settings-main">
+        <div className={isWorkbench ? 'settings-content settings-workbench-content' : 'settings-content settings-detail-scroll'}>
         {!isWorkbench && <div className="settings-page-heading"><span>{copy.eyebrow}</span><h1>{copy.title}</h1><p>{copy.description}</p></div>}
-        {props.message && ['providers', 'auto-login'].includes(props.activeSection) && <div className="settings-notice">{props.message}</div>}
+        {props.message && props.activeSection === 'auto-login' && <div className="settings-notice">{props.message}</div>}
 
         {props.activeSection === 'general' && (
           <div className="settings-section-stack">
@@ -1180,14 +1462,19 @@ function SettingsSurface(props: {
               <SettingsRow title="Local run history" description="실행 단계와 provider 출력을 로컬 JSONL로 기록합니다."><Toggle checked={props.preferences.localLogs} onChange={(checked) => props.onSetPreferences((current) => ({ ...current, localLogs: checked }))} /></SettingsRow>
               <SettingsRow title="Compact interface" description="사이드 패널과 설정 행의 간격을 줄여 더 많은 정보를 표시합니다."><Toggle checked={props.preferences.compact} onChange={(checked) => props.onSetPreferences((current) => ({ ...current, compact: checked }))} /></SettingsRow>
             </SettingsGroup>
+            <SettingsGroup title="Execution" description="현재 운영체제에서 agent를 실행하는 로컬 환경입니다.">
+              <SettingsRow title="Agent runtime" description="공식 provider CLI를 현재 운영체제에서 직접 실행합니다."><span className="setting-value">Local native</span></SettingsRow>
+              <SettingsRow title="Login terminal" description="사용자가 직접 로그인하는 화면에만 시스템 터미널을 사용합니다."><span className="setting-value">System terminal</span></SettingsRow>
+              <SettingsRow title="Browser engine" description="현재 Electron 탭과 연결되는 자동화 엔진입니다."><span className="setting-value ready-dot">agent-browser</span></SettingsRow>
+            </SettingsGroup>
+          </div>
+        )}
+
+        {props.activeSection === 'permissions' && (
+          <div className="settings-section-stack">
             <SettingsGroup title="Browser permissions" description="모든 Skill과 브라우저 작업에 동일하게 적용됩니다. Ask는 해당 동작이 실행될 때 한 번 확인합니다.">
               <SettingsRow title="Downloads" description="사이트가 파일을 내려받기 전에 적용할 기본 정책입니다."><PermissionSelect value={props.browserPermissions.download} onChange={(download) => props.onSetBrowserPermissions({ ...props.browserPermissions, download })} /></SettingsRow>
               <SettingsRow title="Uploads" description="Agent가 로컬 파일을 외부 사이트에 전송하기 전에 적용할 기본 정책입니다."><PermissionSelect value={props.browserPermissions.upload} onChange={(upload) => props.onSetBrowserPermissions({ ...props.browserPermissions, upload })} /></SettingsRow>
-            </SettingsGroup>
-            <SettingsGroup title="Execution" description="Windows에서 agent를 실행하는 기본 환경입니다.">
-              <SettingsRow title="Agent runtime" description="공식 provider CLI를 직접 실행하는 로컬 Windows 환경입니다."><span className="setting-value">Windows native</span></SettingsRow>
-              <SettingsRow title="Login terminal" description="사용자가 직접 로그인하는 화면에만 PowerShell을 사용합니다."><span className="setting-value">PowerShell</span></SettingsRow>
-              <SettingsRow title="Browser engine" description="현재 Electron 탭과 연결되는 자동화 엔진입니다."><span className="setting-value ready-dot">agent-browser</span></SettingsRow>
             </SettingsGroup>
           </div>
         )}
@@ -1203,18 +1490,48 @@ function SettingsSurface(props: {
         )}
 
         {props.activeSection === 'providers' && (
-          <div className="provider-grid settings-provider-grid">
-            {props.providers.map((provider) => (
-              <article className="provider-card" key={provider.id}>
-                <div className="provider-card-head"><span className="brand-icon"><BotSparkle24Filled /></span><div><strong>{provider.label}</strong><small>{provider.version || 'CLI not found'}</small></div><span className={provider.available ? 'status-pill ready' : 'status-pill'}>{provider.available ? 'Connected' : provider.installed ? 'Setup' : 'Not installed'}</span></div>
-                <p>{provider.description}</p>
-                {provider.error && <div className="provider-error">{provider.error}</div>}
-                {provider.complianceNotice && <div className="provider-policy">{provider.complianceNotice}</div>}
-                <button className="provider-action" disabled={!provider.subscriptionAuth || !provider.installed} onClick={() => props.onConnect(provider.id)}>
-                  {provider.authenticated ? '다시 로그인' : provider.subscriptionAuth ? '구독 연결' : 'API 연결 준비 중'}
-                </button>
-              </article>
-            ))}
+          <div className="aside-ai-settings">
+            <section className="aside-setting-block">
+              <h2>Providers</h2>
+              <div className="aside-provider-list">
+                <div className="aside-provider-row">
+                  <span className="aside-provider-icon"><BotSparkle24Filled /></span>
+                  <span><strong>XGEN Side</strong><small>Local</small></span>
+                </div>
+                {connectedProviders.map((provider) => {
+                  const connecting = props.authenticatingProviderId === provider.id && !provider.authenticated;
+                  return (
+                    <div className="aside-provider-row" key={provider.id}>
+                      <span className="aside-provider-icon muted"><BotSparkle24Filled /></span>
+                      <span><strong>{provider.id === 'codex' ? 'ChatGPT' : provider.label}</strong><small>Subscription</small></span>
+                      <span className={connecting ? 'provider-usage connecting' : 'provider-usage'}>{connecting ? 'Connecting' : 'Connected'}</span>
+                      <button className="provider-more" type="button" aria-label={`${provider.label} 연결 메뉴`} onClick={() => setProviderMenuId((current) => current === provider.id ? null : provider.id)}>•••</button>
+                      {providerMenuId === provider.id && (
+                        <div className="provider-action-menu">
+                          <span>{provider.authenticated ? 'Connected' : 'Waiting for login'}</span>
+                          <button type="button" onClick={() => { setProviderMenuId(null); props.onConnect(provider.id); }}>Reconnect</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="aside-connect-row">
+                  <button type="button" onClick={() => setConnectMenuOpen((current) => !current)}><Add24Regular /><span>Connect</span></button>
+                  {connectMenuOpen && (
+                    <div className="aside-connect-menu" role="menu">
+                      <small>Subscription</small>
+                      {props.providers.map((provider) => (
+                        <button type="button" role="menuitem" key={provider.id} disabled={!provider.subscriptionAuth || !provider.installed || provider.authenticated} onClick={() => { setConnectMenuOpen(false); props.onConnect(provider.id); }}>
+                          <BotSparkle24Filled /><span><strong>{provider.id === 'codex' ? 'ChatGPT' : provider.label}</strong><small>{provider.installed ? provider.version ?? 'CLI ready' : 'CLI not installed'}</small></span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {props.message && <div className="aside-provider-message">{props.message}</div>}
+            </section>
+            <AsideModelSettings providers={props.providers} />
           </div>
         )}
 
@@ -1229,8 +1546,43 @@ function SettingsSurface(props: {
         {props.activeSection === 'data' && (
           <MemoryWorkbench localData={props.localData} onOpenData={props.onOpenData} />
         )}
+        </div>
+        </div>
       </div>
     </section>
+  );
+}
+
+function AsideModelSettings(props: { providers: ProviderStatus[] }): ReactElement {
+  const models = props.providers.find((provider) => provider.id === 'codex')?.models ?? [];
+  const first = models[0]?.label ?? '5.6 Sol';
+  const second = models[1]?.label ?? first;
+  return (
+    <>
+      <section className="aside-setting-block aside-model-settings">
+        <h2>Task models</h2>
+        <div className="aside-settings-list">
+          <label><span><strong>Fast</strong><small>Quick, cheap, bounded side work</small></span><select defaultValue={first}><option>{first}</option></select></label>
+          <label><span><strong>Standard</strong><small>Durable internal background work</small></span><select defaultValue={second}><option>{second}</option></select></label>
+          <label><span><strong>Deep</strong><small>Hard reasoning, planning, judging, and synthesis</small></span><select defaultValue={first}><option>{first}</option></select></label>
+          <label><span><strong>Visual</strong><small>Image, screenshot, and page interpretation</small></span><select defaultValue={first}><option>{first}</option></select></label>
+        </div>
+        <div className="aside-settings-list aside-default-model">
+          <label><span><strong>Default model</strong><small>The last used model becomes the default for new sessions</small></span><select defaultValue={first}><option>{first}</option></select></label>
+        </div>
+      </section>
+      <section className="aside-setting-block">
+        <h2>Chat settings</h2>
+        <div className="aside-settings-list"><label><span><strong>Follow-up behavior</strong><small>Queue follow-ups while XGEN Side runs or steer the current run.</small></span><select defaultValue="Queue"><option>Queue</option><option>Steer</option></select></label></div>
+      </section>
+      <section className="aside-setting-block aside-workspace-dependencies">
+        <h2>Workspace Dependencies</h2>
+        <div className="aside-settings-list">
+          <div><span><strong>Runtime</strong><small>Bundled Node.js and Python tools</small></span><b>Local native</b></div>
+          <div><span><strong>Login terminal</strong><small>Opens only for subscription authentication</small></span><b>System terminal</b></div>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -1391,10 +1743,12 @@ function Toggle(props: { checked: boolean; onChange(value: boolean): void }): Re
 
 function MessageBubble({ message, onOpenLink }: { message: ChatMessage; onOpenLink?(url: string): void }): ReactElement {
   if (message.overview) return <AgentOverview overview={message.overview} />;
+  const state = message.meta?.includes('실패') ? 'failed' : message.meta?.includes('중지') ? 'cancelled' : '';
   return (
-    <article className={`message message-${message.role}`}>
+    <article className={`message message-${message.role}${state ? ` message-${state}` : ''}`}>
       {message.role === 'assistant' && <span className="message-avatar"><BotSparkle24Filled /></span>}
       <div className="message-body">
+        {message.attachments?.length ? <div className="message-file-list" aria-label="첨부 파일">{message.attachments.map((attachment) => <span className="message-file-chip" key={attachment.id}><Document24Regular /><span><strong>{attachment.name}</strong><small>{attachment.kind.toUpperCase()} · {formatBytes(attachment.size)}</small></span></span>)}</div> : null}
         <div className="markdown-content">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -1415,56 +1769,77 @@ function MessageBubble({ message, onOpenLink }: { message: ChatMessage; onOpenLi
           </ReactMarkdown>
         </div>
         {message.meta && <small className="message-meta">{message.meta}</small>}
+        {message.artifacts?.length ? <div className="artifact-list" aria-label="결과 파일">{message.artifacts.map((artifact) => <ArtifactCard artifact={artifact} key={artifact.id} />)}</div> : null}
       </div>
     </article>
   );
 }
 
+function ArtifactCard({ artifact }: { artifact: LocalArtifact }): ReactElement {
+  const [errorMessage, setErrorMessage] = useState('');
+  const openArtifact = async (): Promise<void> => {
+    setErrorMessage('');
+    try {
+      await window.xgenSide.artifacts.open(artifact.sessionId, artifact.relativePath);
+    } catch {
+      setErrorMessage('이 파일을 열 기본 앱을 찾지 못했습니다.');
+    }
+  };
+  return <div className="artifact-card"><Document24Regular /><span><strong>{artifact.name}</strong><small>{artifact.kind.toUpperCase()} · {formatBytes(artifact.size)}</small></span><button type="button" onClick={() => void openArtifact()}><Open24Regular />열기</button><button type="button" className="artifact-reveal" onClick={() => void window.xgenSide.artifacts.reveal(artifact.sessionId, artifact.relativePath)}>폴더에서 보기</button>{errorMessage && <small className="artifact-error" role="alert">{errorMessage} 폴더에서 보기를 이용해 주세요.</small>}</div>;
+}
+
 function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overview']> }): ReactElement {
   const [expanded, setExpanded] = useState(overview.status === 'running');
-  const statusLabel = overview.status === 'running'
-    ? 'Running'
-    : overview.status === 'completed'
-      ? 'Completed'
-      : overview.status === 'cancelled'
-        ? 'Cancelled'
-        : 'Needs attention';
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    if (overview.status !== 'running') return undefined;
+    const interval = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [overview.status]);
+  const elapsedMs = overview.durationMs ?? (overview.startedAt ? Math.max(0, Date.now() - Date.parse(overview.startedAt)) : 0);
+  const workedLabel = overview.status === 'running' ? `Working for ${formatRunDuration(elapsedMs)}` : `Worked for ${formatRunDuration(elapsedMs)}`;
+  const activities = overview.activities ?? [];
+  const timeline = [
+    ...activities.map((activity, index) => ({ kind: 'activity' as const, at: activity.startedAt ?? '', activity, index })),
+    ...(overview.snapshots ?? []).map((snapshot) => ({ kind: 'snapshot' as const, at: snapshot.capturedAt, snapshot })),
+  ].sort((left, right) => left.at.localeCompare(right.at));
+  const usedSkills = overview.route.skills.filter((skill) => skill.id !== 'xgen.conversation');
   return (
     <article className={expanded ? 'agent-overview expanded' : 'agent-overview'}>
       <button className="overview-header" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
-        <div><span className="overview-brand"><BotSparkle24Filled /></span><span><strong>{overview.activity || overview.route.reason}</strong><small>{overview.route.skills.map((skill) => skill.name).join(' · ')}</small></span></div>
-        <span className="overview-header-actions"><span className={`overview-status ${overview.status}`}>{statusLabel}</span><ChevronDown24Regular className={expanded ? 'chevron-open' : ''} /></span>
+        <span><strong>{workedLabel}</strong><ChevronRight24Regular className={expanded ? 'chevron-open' : ''} /></span>
       </button>
       {expanded && <div className="overview-details">
-        <div className="overview-skills"><span>사용 중인 skill</span>{overview.route.skills.map((skill) => <span className="skill-chip" key={skill.id}><PuzzlePiece24Regular />{skill.name}<small>{skill.risk}</small></span>)}</div>
-        <div className="overview-timeline">
-          {overview.route.steps.map((step, index) => {
-            const running = overview.status === 'running' && index === overview.route.steps.length - 1;
-            const complete = overview.status === 'completed' || index < overview.route.steps.length - 1;
-            return (
-              <div className={running ? 'overview-step running' : 'overview-step'} key={step.id}>
-                <span className="step-icon">{complete ? <CheckmarkCircle24Regular /> : step.kind === 'browser' ? <Globe24Regular /> : step.kind === 'guard' ? <ShieldLock24Regular /> : <Sparkle24Filled />}</span>
-                <span><strong>{step.label}</strong><small>{step.detail}</small></span>
-                <span className={overview.status === 'failed' && index === overview.route.steps.length - 1 ? 'step-state failed' : 'step-state'}>{running ? '진행 중' : complete ? '완료' : index + 1}</span>
+        {timeline.length ? <div className="aside-run-timeline" aria-label="실시간 브라우저 활동">
+          {timeline.map((item, timelineIndex) => <Fragment key={item.kind === 'activity' ? item.activity.id : item.snapshot.id}>
+            {item.kind === 'activity' ? (
+              <div className={`aside-run-step ${item.activity.phase}`}>
+                <span className="aside-run-icon">{activityIcon(item.activity.name, item.activity.phase)}</span>
+                <span><strong>{activityLabel(item.activity.name, item.index, activities, overview.route)}</strong>{item.activity.detail && (item.activity.name === 'Local command' ? <details className="aside-run-command"><summary>명령 보기</summary><code>{item.activity.detail}</code></details> : <small>{item.activity.detail}</small>)}</span>
               </div>
-            );
-          })}
-        </div>
-        {overview.activities?.length ? <div className="overview-live-activity" aria-label="실시간 브라우저 활동">
-          <span className="overview-live-title"><span className={overview.status === 'running' ? 'live-browser-status active' : 'live-browser-status'} />Live activity</span>
-          {overview.activities.slice(-6).map((activity) => (
-            <div className={`overview-live-row ${activity.phase}`} key={activity.id}>
-              <span className="step-icon">{activity.phase === 'completed' ? <CheckmarkCircle24Regular /> : activity.phase === 'failed' ? <Dismiss24Regular /> : <Circle24Regular />}</span>
-              <span><strong>{activity.name}</strong>{activity.detail && <small>{activity.detail}</small>}</span>
-              <b>{activity.phase === 'started' ? '실행 중' : activity.phase === 'completed' ? '완료' : activity.phase}</b>
-            </div>
-          ))}
-        </div> : null}
-        {overview.route.browserVisible && <div className="overview-browser-note"><Window24Regular /><span><strong>브라우저 작업 캡처</strong><small>{overview.route.targetHost || '검색 탭'} · 동작과 화면 전환 시 오른쪽에 기록</small></span></div>}
+            ) : (
+              <figure className="aside-run-snapshot">
+                <img src={item.snapshot.imageDataUrl} alt={`${item.snapshot.title} 브라우저 캡처`} />
+                <figcaption>{item.snapshot.title} · {formatHost(item.snapshot.url)}</figcaption>
+              </figure>
+            )}
+            {timelineIndex === 0 && usedSkills.map((skill) => <div className="aside-used-skill" key={skill.id}><PuzzlePiece24Regular /><span>Used <strong>{skill.name}</strong> skill</span></div>)}
+          </Fragment>)}
+        </div> : <>
+          {usedSkills.map((skill) => <div className="aside-used-skill" key={skill.id}><PuzzlePiece24Regular /><span>Used <strong>{skill.name}</strong> skill</span></div>)}
+          <div className="aside-run-waiting"><Circle24Regular />첫 실행 단계를 기다리는 중</div>
+        </>}
         {overview.route.blockedReason && <div className="overview-blocked"><ShieldLock24Regular />{overview.route.blockedReason}</div>}
       </div>}
     </article>
   );
+}
+
+function activityIcon(name: string, phase: 'started' | 'updated' | 'completed' | 'failed'): ReactElement {
+  if (phase === 'failed') return <Dismiss24Regular />;
+  if (phase === 'started' || phase === 'updated') return <Circle24Regular />;
+  if (/^Read |tab_list|auth_login|session_info/.test(name)) return <Document24Regular />;
+  return <Globe24Regular />;
 }
 
 function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMode; label: string }>; placeholder: string }): ReactElement {
@@ -1484,27 +1859,37 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
   };
   return (
     <form className="composer" onSubmit={props.onSubmit}>
+      {props.attachments?.length ? <div className="composer-attachments" aria-label="선택한 파일">{props.attachments.map((attachment) => <span className="composer-attachment" key={attachment.id}><Document24Regular /><span><strong>{attachment.name}</strong><small>{attachment.kind.toUpperCase()}</small></span><button type="button" aria-label={`${attachment.name} 제거`} onClick={() => props.onRemoveAttachment?.(attachment.id)}><Dismiss24Regular /></button></span>)}</div> : null}
+      {props.attachmentMessage && <div className="composer-file-error" role="status">{props.attachmentMessage}</div>}
       <div className="composer-primary">
         <textarea value={props.prompt} onChange={(event) => props.onChangePrompt(event.target.value)} onKeyDown={submitOnEnter} placeholder={props.busy ? '로컬 agent가 실행 중입니다' : props.placeholder} aria-label={`${props.placeholder}. Enter로 전송, Shift+Enter로 줄바꿈`} disabled={props.busy} />
         <label className="mode-select"><span className="sr-only">실행 범위</span><select value={props.mode} onChange={(event) => props.onChangeMode(event.target.value as AgentMode)}>{props.modes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
       </div>
       <div className="composer-tools">
         <div className="composer-context-tools">
-          <button type="button" className="icon-button compact" aria-label="파일 첨부"><Attach24Regular /></button>
+          <button type="button" className="icon-button compact" aria-label="파일 첨부" onClick={props.onPickAttachments} disabled={props.busy || !props.onPickAttachments}><Attach24Regular /></button>
+          <button type="button" className="composer-project"><Document24Regular />Project<ChevronDown24Regular /></button>
           {props.skills?.length && props.onChangeSelectedSkill ? <label className="skill-run-select"><PuzzlePiece24Regular /><span className="sr-only">실행 Skill 선택</span><select value={props.selectedSkillId ?? ''} onChange={(event) => props.onChangeSelectedSkill?.(event.target.value)}><option value="">Auto skill</option>{props.skills.map((skill) => <option key={skill.id} value={skill.id}>{skill.name}</option>)}</select><ChevronDown24Regular /></label> : null}
           <span className="mode-boundary-hint">{modeHint[props.mode]}</span>
-          <span className="context-chip"><Document24Regular />Local<ChevronDown24Regular /></span>
         </div>
         <div className="composer-options">
           <label className={`permission-mode-select permission-${props.permissionMode}`}><ShieldLock24Regular /><span className="sr-only">Agent 권한</span><select value={props.permissionMode} onChange={(event) => props.onChangePermissionMode(event.target.value as AgentPermissionMode)}><option value="read-only">Read only</option><option value="guard">Guard</option><option value="full-access">Full access</option></select><ChevronDown24Regular /></label>
           <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
           <label className="compact-select model-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
+          {props.selectedProvider?.supportsReasoningEffort && <label className="compact-select effort-select"><span className="sr-only">Reasoning effort</span><select value={props.reasoningEffort} onChange={(event) => props.onChangeReasoningEffort(event.target.value as ReasoningEffort)}><option value="auto">Auto</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Very high</option></select><ChevronDown24Regular /></label>}
           <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
+          {!props.busy && <button className="send-button" type="submit" disabled={!props.prompt.trim() || !props.selectedProvider?.available} aria-label="전송"><ArrowRight24Regular /></button>}
           {props.busy && <button type="button" className="send-button stop-button" onClick={props.onCancel} aria-label="실행 중지"><Dismiss24Regular /></button>}
         </div>
       </div>
     </form>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function credentialAutofillMessage(state: 'not-found' | 'origin-mismatch' | 'no-password-field' | 'unavailable'): string {
@@ -1537,7 +1922,7 @@ function applyRunEvent(
     }
     if (overviewId && message.id === overviewId && message.overview) {
       if (event.type === 'run-started') {
-        return { ...message, overview: { ...message.overview, sessionId: event.sessionId, activity: runEventLabel(event) } };
+        return { ...message, overview: { ...message.overview, sessionId: event.sessionId, startedAt: event.at, activity: runEventLabel(event) } };
       }
       if (event.type === 'browser-tab-attached') {
         return { ...message, overview: { ...message.overview, browserTabId: event.tab.id, activity: runEventLabel(event) } };
@@ -1547,11 +1932,13 @@ function applyRunEvent(
         return { ...message, overview: { ...message.overview, snapshots, activity: event.snapshot.reason } };
       }
       if (event.type === 'activity') {
+        const authState = inferAuthState(`${event.name} ${event.detail ?? ''}`) ?? message.overview.authState;
         return {
           ...message,
           overview: {
             ...message.overview,
             activity: runEventLabel(event),
+            authState,
             activities: updateRunActivities(message.overview.activities ?? [], event),
           },
         };
@@ -1562,9 +1949,20 @@ function applyRunEvent(
           overview: {
             ...message.overview,
             status: event.state,
+            durationMs: event.durationMs,
             activity: runEventLabel(event),
           },
         };
+      }
+      if (event.type === 'approval-required' && event.action === 'auth_login') {
+        return { ...message, overview: { ...message.overview, activity: runEventLabel(event), authState: 'approval' } };
+      }
+      if (event.type === 'approval-resolved' && message.overview.authState === 'approval') {
+        return { ...message, overview: { ...message.overview, activity: runEventLabel(event), authState: event.decision === 'allow' ? 'verifying' : 'preparing' } };
+      }
+      if (event.type === 'text') {
+        const authState = inferAuthState(event.text) ?? message.overview.authState;
+        return { ...message, overview: { ...message.overview, activity: runEventLabel(event), authState } };
       }
       return { ...message, overview: { ...message.overview, activity: runEventLabel(event) } };
     }
@@ -1578,14 +1976,29 @@ function updateRunActivities(
 ): NonNullable<NonNullable<ChatMessage['overview']>['activities']> {
   const next = [...activities];
   if (event.phase === 'started') {
-    next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail });
+    next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail, startedAt: event.at });
     return next.slice(-12);
   }
   const index = next.findLastIndex((activity) => activity.name === event.name && ['started', 'updated'].includes(activity.phase));
   const existing = index >= 0 ? next[index] : undefined;
-  if (existing) next[index] = { ...existing, phase: event.phase, detail: event.detail || existing.detail };
-  else next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail });
+  if (existing) next[index] = { ...existing, phase: event.phase, detail: event.detail || existing.detail, durationMs: existing.startedAt ? Math.max(0, Date.parse(event.at) - Date.parse(existing.startedAt)) : undefined };
+  else next.push({ id: `${event.at}-${next.length}`, name: event.name, phase: event.phase, detail: event.detail, startedAt: event.at });
   return next.slice(-12);
+}
+
+function inferAuthState(input: string): NonNullable<NonNullable<ChatMessage['overview']>['authState']> | undefined {
+  if (/qr code|qr 코드|qr 로그인|qr·기기/i.test(input)) return 'qr-device';
+  if (/passkey|webauthn|touch id|windows hello|패스키|기기 인증/i.test(input)) return 'device';
+  if (/verify|signed.?in|로그인 상태 확인|인증 확인/i.test(input)) return 'verifying';
+  return undefined;
+}
+
+function formatRunDuration(durationMs: number): string {
+  if (durationMs < 1_000) return '<1s';
+  const seconds = Math.round(durationMs / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
 function runEventLabel(event: AgentRunEvent): string {

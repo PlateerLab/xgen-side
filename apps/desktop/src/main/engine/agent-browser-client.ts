@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
-import { app } from 'electron';
 import type { EngineStatus } from '../../shared/contracts';
-
-const binaryName = process.arch === 'arm64'
-  ? 'agent-browser-win32-arm64.exe'
-  : 'agent-browser-win32-x64.exe';
+import { agentBrowserBinaryName, currentDesktopArchitecture, currentDesktopPlatform } from '../platform/platform-runtime';
 
 export class AgentBrowserClient {
+  constructor(
+    private readonly appPath: string,
+    private readonly resourcesPath: string,
+  ) {}
+
   async status(): Promise<EngineStatus> {
     const executablePath = await this.findExecutable();
     if (!executablePath) {
@@ -31,11 +32,12 @@ export class AgentBrowserClient {
   }
 
   private async findExecutable(): Promise<string | undefined> {
+    const binaryName = agentBrowserBinaryName(currentDesktopPlatform(), currentDesktopArchitecture());
     const candidates = [
       join(process.cwd(), 'bin', binaryName),
       join(process.cwd(), '..', '..', 'bin', binaryName),
-      join(app.getAppPath(), '..', '..', 'bin', binaryName),
-      join(process.resourcesPath, 'engine', binaryName),
+      join(this.appPath, '..', '..', 'bin', binaryName),
+      join(this.resourcesPath, 'engine', binaryName),
     ];
 
     for (const candidate of candidates) {

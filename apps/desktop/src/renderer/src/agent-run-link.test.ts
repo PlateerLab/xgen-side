@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BrowserTabState } from '../../shared/contracts';
-import { isRunLinkedTab, messagesForAgentTab } from './agent-run-link';
+import { chatIdForAgentTab, isRunLinkedTab, messagesForAgentTab } from './agent-run-link';
 
 function tab(agentRunId?: string): BrowserTabState {
   return {
@@ -34,4 +34,12 @@ test('keeps renderer run identity separate from provider session identity', () =
   const message = { id: 'overview', overview: { runId: 'renderer-1' }, sessionId: 'session-99' };
   assert.deepEqual(messagesForAgentTab([message], tab('renderer-1')), [message]);
   assert.deepEqual(messagesForAgentTab([message], tab('session-99')), []);
+});
+
+test('finds the owning chat before a linked Agent tab accepts a follow-up', () => {
+  assert.equal(chatIdForAgentTab({
+    'chat-a': [{ runId: 'run-a' }],
+    'chat-b': [{ overview: { runId: 'run-b' } }],
+  }, tab('run-b')), 'chat-b');
+  assert.equal(chatIdForAgentTab({ 'chat-a': [{ runId: 'run-a' }] }, tab('missing')), undefined);
 });
