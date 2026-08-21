@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ClaudeCodeAdapter } from './claude-code-adapter';
+import { ClaudeCodeAdapter, claudeExecutableCandidates } from './claude-code-adapter';
 import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
 import type { LocalRunStore } from '../storage/local-run-store';
 
@@ -55,9 +55,32 @@ test('Codex adapter pre-approves the capability-bounded XGEN browser MCP server'
 test('Codex adapter locates current and legacy npm native executables', () => {
   const appData = join('C:', 'Users', 'tester', 'AppData', 'Roaming');
   const vendorRoot = join(appData, 'npm', 'node_modules', '@openai', 'codex', 'node_modules', '@openai/codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc');
-  assert.deepEqual(codexNpmExecutableCandidates(appData, 'x64'), [
+  assert.deepEqual(codexNpmExecutableCandidates(appData, 'x64', 'win32'), [
     join(vendorRoot, 'bin', 'codex.exe'),
     join(vendorRoot, 'codex', 'codex.exe'),
+  ]);
+});
+
+test('Codex adapter locates npm native executables inside a macOS npm prefix', () => {
+  const root = join('/opt', 'homebrew', 'lib');
+  const vendorRoot = join(root, 'node_modules', '@openai', 'codex', 'node_modules', '@openai/codex-darwin-arm64', 'vendor', 'aarch64-apple-darwin');
+  assert.deepEqual(codexNpmExecutableCandidates(root, 'arm64', 'darwin'), [
+    join(vendorRoot, 'bin', 'codex'),
+    join(vendorRoot, 'codex', 'codex'),
+  ]);
+});
+
+test('Claude adapter probes the POSIX installer directories', () => {
+  const home = join('/Users', 'tester');
+  assert.deepEqual(claudeExecutableCandidates('darwin', home), [
+    join(home, '.local', 'bin', 'claude'),
+    join(home, '.claude', 'local', 'claude'),
+    join(home, 'bin', 'claude'),
+    join('/opt', 'homebrew', 'bin', 'claude'),
+    join('/usr', 'local', 'bin', 'claude'),
+  ]);
+  assert.deepEqual(claudeExecutableCandidates('win32', join('C:', 'Users', 'tester')), [
+    join(process.env.USERPROFILE ?? join('C:', 'Users', 'tester'), '.local', 'bin', 'claude.exe'),
   ]);
 });
 

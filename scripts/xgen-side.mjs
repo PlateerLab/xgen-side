@@ -35,12 +35,26 @@ if (!args) {
   process.exit(2);
 }
 
+// Electron ships one executable layout per platform. Keep the packaged path in one
+// place so the development runner works on Windows, macOS, and Linux alike.
+const electronExecutableSegments = {
+  win32: ['dist', 'electron.exe'],
+  darwin: ['dist', 'Electron.app', 'Contents', 'MacOS', 'Electron'],
+}[process.platform] ?? ['dist', 'electron'];
+
+// Editors that embed Electron export ELECTRON_RUN_AS_NODE=1 to their integrated
+// terminals. Inheriting it boots Electron as a plain Node runtime, and the ESM main
+// process then fails with "The requested module 'electron' does not provide an export
+// named 'BrowserWindow'". The desktop shell always needs the full Electron runtime.
+delete process.env.ELECTRON_RUN_AS_NODE;
+delete process.env.ELECTRON_NO_ATTACH_CONSOLE;
+
 const [entry, ...entryArgs] = args;
 const pnpmStore = join(repositoryRoot, 'node_modules', '.pnpm');
 if (!process.env.ELECTRON_EXEC_PATH && existsSync(pnpmStore)) {
   const electronPackage = readdirSync(pnpmStore).find((name) => /^electron@\d+\.\d+\.\d+$/.test(name));
   const electronExecutable = electronPackage
-    ? join(pnpmStore, electronPackage, 'node_modules', 'electron', 'dist', 'electron.exe')
+    ? join(pnpmStore, electronPackage, 'node_modules', 'electron', ...electronExecutableSegments)
     : '';
   if (electronExecutable && existsSync(electronExecutable)) process.env.ELECTRON_EXEC_PATH = electronExecutable;
 }

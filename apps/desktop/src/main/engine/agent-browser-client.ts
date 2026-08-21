@@ -4,9 +4,19 @@ import { join } from 'node:path';
 import { app } from 'electron';
 import type { EngineStatus } from '../../shared/contracts';
 
-const binaryName = process.arch === 'arm64'
-  ? 'agent-browser-win32-arm64.exe'
-  : 'agent-browser-win32-x64.exe';
+// The engine binary is named after the host platform and architecture. A locally built
+// binary keeps the native architecture, while the download step falls back to the x64
+// build on Windows ARM64, so both names are accepted there.
+const binaryNames = ((): string[] => {
+  const architecture = process.arch === 'arm64' ? 'arm64' : 'x64';
+  if (process.platform === 'win32') {
+    return architecture === 'arm64'
+      ? ['agent-browser-win32-arm64.exe', 'agent-browser-win32-x64.exe']
+      : ['agent-browser-win32-x64.exe'];
+  }
+  if (process.platform === 'darwin') return [`agent-browser-darwin-${architecture}`];
+  return [`agent-browser-linux-${architecture}`];
+})();
 
 export class AgentBrowserClient {
   async status(): Promise<EngineStatus> {
@@ -31,12 +41,15 @@ export class AgentBrowserClient {
   }
 
   private async findExecutable(): Promise<string | undefined> {
-    const candidates = [
-      join(process.cwd(), 'bin', binaryName),
-      join(process.cwd(), '..', '..', 'bin', binaryName),
-      join(app.getAppPath(), '..', '..', 'bin', binaryName),
-      join(process.resourcesPath, 'engine', binaryName),
+    const directories = [
+      join(process.cwd(), 'bin'),
+      join(process.cwd(), '..', '..', 'bin'),
+      join(app.getAppPath(), '..', '..', 'bin'),
+      join(process.resourcesPath, 'engine'),
     ];
+    const candidates = directories.flatMap((directory) =>
+      binaryNames.map((name) => join(directory, name)),
+    );
 
     for (const candidate of candidates) {
       try {

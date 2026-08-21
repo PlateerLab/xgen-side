@@ -1,4 +1,5 @@
 import { readdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
 import { LocalRunStore, type RunSession } from '../storage/local-run-store';
@@ -142,6 +143,15 @@ export class CodexAdapter implements ProviderAdapter {
 
   private async locate(): Promise<{ path: string; version: string } | undefined> {
     const candidates: string[] = [];
+
+    if (process.platform !== 'win32') {
+      for (const root of codexPosixNpmRoots()) {
+        candidates.push(...codexNpmExecutableCandidates(root, process.arch));
+      }
+      candidates.push(...codexPosixExecutableCandidates());
+      return locateNativeExecutable('codex', candidates);
+    }
+
     const appData = process.env.APPDATA;
     if (appData) {
       candidates.push(...codexNpmExecutableCandidates(appData, process.arch));
@@ -184,23 +194,72 @@ export function codexBrowserMcpOverrides(browser: BrowserBridge): string[] {
   ];
 }
 
-export function codexNpmExecutableCandidates(appData: string, architecture: NodeJS.Architecture): string[] {
+/**
+ * Native executables vendored by the @openai/codex npm package. On Windows the root is
+ * APPDATA, which holds the global npm prefix; on POSIX it is the lib directory of an npm
+ * prefix such as /opt/homebrew/lib.
+ */
+export function codexNpmExecutableCandidates(
+  root: string,
+  architecture: NodeJS.Architecture,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
   const packageArchitecture = architecture === 'arm64' ? 'arm64' : 'x64';
-  const target = architecture === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
-  const vendorRoot = join(
-    appData,
-    'npm',
-    'node_modules',
-    '@openai',
-    'codex',
-    'node_modules',
-    `@openai/codex-win32-${packageArchitecture}`,
-    'vendor',
-    target,
-  );
+
+  if (platform === 'win32') {
+    const target = architecture === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
+    const vendorRoot = join(
+      root,
+      'npm',
+      'node_modules',
+      '@openai',
+      'codex',
+      'node_modules',
+      `@openai/codex-win32-${packageArchitecture}`,
+      'vendor',
+      target,
+    );
+    return [
+      join(vendorRoot, 'bin', 'codex.exe'),
+      join(vendorRoot, 'codex', 'codex.exe'),
+    ];
+  }
+
+  const machine = architecture === 'arm64' ? 'aarch64' : 'x86_64';
+  const targets = platform === 'darwin'
+    ? [`${machine}-apple-darwin`]
+    : [`${machine}-unknown-linux-musl`, `${machine}-unknown-linux-gnu`];
+
+  return targets.flatMap((target) => {
+    const vendorRoot = join(
+      root,
+      'node_modules',
+      '@openai',
+      'codex',
+      'node_modules',
+      `@openai/codex-${platform}-${packageArchitecture}`,
+      'vendor',
+      target,
+    );
+    return [join(vendorRoot, 'bin', 'codex'), join(vendorRoot, 'codex', 'codex')];
+  });
+}
+
+/** npm prefixes that commonly hold a global install on macOS and Linux. */
+export function codexPosixNpmRoots(home: string = homedir()): string[] {
+  const roots = [join('/opt', 'homebrew', 'lib'), join('/usr', 'local', 'lib'), join(home, '.npm-global', 'lib')];
+  const prefix = process.env.npm_config_prefix;
+  if (prefix) roots.unshift(join(prefix, 'lib'));
+  return roots;
+}
+
+/** Well known Codex CLI locations outside the npm vendor tree. */
+export function codexPosixExecutableCandidates(home: string = homedir()): string[] {
   return [
-    join(vendorRoot, 'bin', 'codex.exe'),
-    join(vendorRoot, 'codex', 'codex.exe'),
+    join(home, '.codex', 'bin', 'codex'),
+    join(home, '.local', 'bin', 'codex'),
+    join('/opt', 'homebrew', 'bin', 'codex'),
+    join('/usr', 'local', 'bin', 'codex'),
   ];
 }
 

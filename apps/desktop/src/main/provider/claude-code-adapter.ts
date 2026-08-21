@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
 import { LocalRunStore, type RunSession } from '../storage/local-run-store';
@@ -169,13 +170,33 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
   }
 
   private locate(): Promise<{ path: string; version: string } | undefined> {
-    const candidates = process.env.USERPROFILE
-      ? [join(process.env.USERPROFILE, '.local', 'bin', 'claude.exe')]
-      : [];
-    return locateNativeExecutable('claude', candidates);
+    return locateNativeExecutable('claude', claudeExecutableCandidates());
   }
 
   private prepareHome(): Promise<string> {
     return this.store.ensureProviderHome(this.id);
   }
+}
+
+/**
+ * Well known Claude Code CLI install locations. A packaged desktop process inherits a
+ * minimal PATH on macOS, so the official installer directories are probed explicitly.
+ */
+export function claudeExecutableCandidates(
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+): string[] {
+  if (platform === 'win32') {
+    const profile = process.env.USERPROFILE ?? home;
+    return profile ? [join(profile, '.local', 'bin', 'claude.exe')] : [];
+  }
+
+  const candidates = [
+    join(home, '.local', 'bin', 'claude'),
+    join(home, '.claude', 'local', 'claude'),
+    join(home, 'bin', 'claude'),
+  ];
+  if (platform === 'darwin') candidates.push(join('/opt', 'homebrew', 'bin', 'claude'));
+  candidates.push(join('/usr', 'local', 'bin', 'claude'));
+  return candidates;
 }
