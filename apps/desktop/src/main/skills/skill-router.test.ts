@@ -60,6 +60,17 @@ test('auto recognizes the Korean connective form for browser navigation', async 
   assert.equal(route.agentBrowserRequired, true);
 });
 
+test('auto routes screen-showing requests without a URL to browser navigation', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '네이버 화면을 보여줘' });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.equal(route.agentBrowserRequired, true);
+});
+
+test('auto routes site requests phrased with 들어가 to browser navigation', async () => {
+  const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '구글에 들어가서 뭐가 보이는지 알려줘' });
+  assert.equal(route.resolvedMode, 'browser-agent');
+});
+
 test('auto uses the visible browser for cross-retailer price and benefit comparisons', async () => {
   const route = await router().route({
     ...baseRequest,

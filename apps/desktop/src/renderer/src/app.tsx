@@ -314,7 +314,12 @@ export function App(): ReactElement {
   async function refreshProviders(): Promise<ProviderStatus[]> {
     const next = await window.xgenSide.providers.list();
     setProviders(next);
-    const current = next.find((provider) => provider.id === providerId) ?? next[0];
+    // Keep the user's choice only while it can actually run; otherwise fall back to
+    // the first available provider so the composer never boots on a dead selection.
+    const current = next.find((provider) => provider.id === providerId && provider.available)
+      ?? next.find((provider) => provider.available)
+      ?? next.find((provider) => provider.id === providerId)
+      ?? next[0];
     if (current) {
       setProviderId(current.id);
       setModel((value) => current.models.some((item) => item.id === value) ? value : (current.models[0]?.id ?? ''));
@@ -1514,7 +1519,7 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
         </div>
         <div className="composer-options">
           <label className={`permission-mode-select permission-${props.permissionMode}`}><ShieldLock24Regular /><span className="sr-only">Agent 권한</span><select value={props.permissionMode} onChange={(event) => props.onChangePermissionMode(event.target.value as AgentPermissionMode)}><option value="read-only">Read only</option><option value="guard">Guard</option><option value="full-access">Full access</option></select><ChevronDown24Regular /></label>
-          <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
+          <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{`${provider.id === 'codex' ? 'OpenAI' : 'Claude'}${provider.available ? '' : provider.installed ? ' — 로그인 필요' : ' — 설치 필요'}`}</option>)}</select><ChevronDown24Regular /></label>
           <label className="compact-select model-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
           {props.selectedProvider?.supportsReasoningEffort ? <label className="compact-select effort-select"><span className="sr-only">Reasoning</span><select value={props.reasoningEffort} onChange={(event) => props.onChangeReasoningEffort(event.target.value as ReasoningEffort)}>{effortOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label> : null}
           <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
