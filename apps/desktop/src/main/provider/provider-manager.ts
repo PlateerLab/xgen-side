@@ -26,9 +26,10 @@ import { CodexAdapter, codexCompatibilityError } from './codex-adapter';
 import type { BrowserBridge, ProviderAdapter } from './provider-adapter';
 import { collect } from './provider-runtime';
 import { browserActionPolicy } from './browser-action-policy';
+import { modelIdPattern, skillIdPattern } from './identifiers';
 
 const runTimeoutMs = 15 * 60_000;
-const modelIdPattern = /^[A-Za-z0-9._:-]{1,100}$/;
+
 
 export interface AgentRunOptions {
   runId?: string;
@@ -321,7 +322,7 @@ function validateRunRequest(request: AgentRunRequest): void {
   if (request.sourceSurface && !['chat', 'browser-side'].includes(request.sourceSurface)) throw new Error('지원하지 않는 실행 화면입니다.');
   if (request.browserTarget && !['new-agent-tab', 'current-tab'].includes(request.browserTarget)) throw new Error('지원하지 않는 브라우저 대상입니다.');
   if (request.permissionMode && !['read-only', 'guard', 'full-access'].includes(request.permissionMode)) throw new Error('지원하지 않는 권한 모드입니다.');
-  if (request.selectedSkillIds && (request.selectedSkillIds.length > 12 || request.selectedSkillIds.some((id) => !modelIdPattern.test(id)))) {
+  if (request.selectedSkillIds && (request.selectedSkillIds.length > 12 || request.selectedSkillIds.some((id) => !skillIdPattern.test(id)))) {
     throw new Error('선택한 Skill 식별자가 올바르지 않습니다.');
   }
   if (!modelIdPattern.test(request.model)) throw new Error('지원하지 않는 모델 식별자입니다.');

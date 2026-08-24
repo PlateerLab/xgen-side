@@ -1319,3 +1319,35 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 [data-theme='dark'] .settings-inline-note.warning { border-color: #70491d; background: #382810; color: #f3c079; }
 .permission-mode-select:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (max-width: 680px) { .credential-form { grid-template-columns: 1fr; } .credential-row { align-items: flex-start; flex-direction: column; } }
+
+/* Re-run affordance: names the capability that answered and offers the ones it did not
+   use. Shown on the collapsed card so correcting a misroute never requires expanding it. */
+.overview-rerun {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+.overview-rerun > span {
+  margin-right: 2px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 650;
+}
+.overview-rerun button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-soft);
+  background: var(--surface);
+  font-size: 9px;
+  font-weight: 680;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+.overview-rerun button:hover {
+  border-color: rgba(48, 94, 235, 0.35);
+  color: var(--accent);
+  background: var(--accent-soft);
+}

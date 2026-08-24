@@ -40,6 +40,7 @@ import type {
   AgentMode,
   AgentPermissionMode,
   ReasoningEffort,
+  ResolvedAgentMode,
   AgentRunEvent,
   AgentRunHandle,
   AppSettings,
@@ -389,22 +390,22 @@ export function App(): ReactElement {
     setTabs(await window.xgenSide.browser.navigate(address));
   }
 
-  async function sendHomeMessage(event: FormEvent): Promise<void> {
-    event.preventDefault();
-    const value = homePrompt.trim();
+  async function sendHomeMessage(event: FormEvent | undefined, rerun?: { prompt: string; mode: AgentMode }): Promise<void> {
+    event?.preventDefault();
+    const value = (rerun?.prompt ?? homePrompt).trim();
     if (!value || homeBusy) return;
     setHomeMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', content: value }]);
-    setHomePrompt('');
+    if (!rerun) setHomePrompt('');
     setHomeBusy(true);
     setRunningChatId(activeChatId);
     const request = {
       providerId,
       model,
-      mode: homeMode,
+      mode: rerun?.mode ?? homeMode,
       reasoningEffort,
       prompt: value,
       history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
-      selectedSkillIds: homeSelectedSkillId ? [homeSelectedSkillId] : undefined,
+      selectedSkillIds: rerun || !homeSelectedSkillId ? undefined : [homeSelectedSkillId],
       sourceSurface: 'chat' as const,
       browserTarget: 'new-agent-tab' as const,
       permissionMode,
@@ -647,6 +648,7 @@ export function App(): ReactElement {
           onCancel={() => void cancelHomeRun()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
           onOpenSource={(url) => void openSourcePreview(url)}
+          onRerun={(prompt, mode) => void sendHomeMessage(undefined, { prompt, mode })}
           onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
           onSubmit={(event) => void sendHomeMessage(event)}
           prompt={homePrompt}
@@ -890,6 +892,7 @@ function HomeSurface(props: ConversationSurfaceProps & {
   leftWidth: number;
   onOpenBrowser(id: string): void;
   onOpenSource(url: string): void;
+  onRerun(prompt: string, mode: AgentMode): void;
   onOpenChat(id: string): void;
   rightWidth: number;
   tabs: BrowserTabState[];
@@ -907,7 +910,7 @@ function HomeSurface(props: ConversationSurfaceProps & {
         {props.messages.length ? (
           <>
             <div className={hasOverview ? 'conversation-stream overview-stream' : 'conversation-stream'} role="region" tabIndex={0} aria-label="대화 내용">
-              {props.messages.map((message) => <MessageBubble key={message.id} message={message} onOpenLink={props.onOpenSource} />)}
+              {props.messages.map((message) => <MessageBubble key={message.id} message={message} onOpenLink={props.onOpenSource} onRerun={props.onRerun} />)}
             </div>
             {composer}
           </>
@@ -1402,8 +1405,8 @@ function Toggle(props: { checked: boolean; onChange(value: boolean): void }): Re
   return <label className="toggle"><input type="checkbox" aria-label="사용 여부 전환" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /><span /></label>;
 }
 
-function MessageBubble({ message, onOpenLink }: { message: ChatMessage; onOpenLink?(url: string): void }): ReactElement {
-  if (message.overview) return <AgentOverview overview={message.overview} />;
+function MessageBubble({ message, onOpenLink, onRerun }: { message: ChatMessage; onOpenLink?(url: string): void; onRerun?(prompt: string, mode: AgentMode): void }): ReactElement {
+  if (message.overview) return <AgentOverview overview={message.overview} onRerun={onRerun} />;
   return (
     <article className={`message message-${message.role}`}>
       {message.role === 'assistant' && <span className="message-avatar"><BotSparkle24Filled /></span>}
@@ -1433,7 +1436,7 @@ function MessageBubble({ message, onOpenLink }: { message: ChatMessage; onOpenLi
   );
 }
 
-function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overview']> }): ReactElement {
+function AgentOverview({ overview, onRerun }: { overview: NonNullable<ChatMessage['overview']>; onRerun?(prompt: string, mode: AgentMode): void }): ReactElement {
   const [expanded, setExpanded] = useState(overview.status === 'running');
   const statusLabel = overview.status === 'running'
     ? 'Running'
@@ -1442,12 +1445,29 @@ function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overvi
       : overview.status === 'cancelled'
         ? 'Cancelled'
         : 'Needs attention';
+  // A finished run states which capability answered and offers the ones it did not use,
+  // so a misroute costs one click instead of a retyped request.
+  const rerunTargets = onRerun && (overview.status === 'completed' || overview.status === 'failed')
+    ? ([
+        { mode: 'browser-agent' as AgentMode, label: '브라우저로 다시 실행' },
+        { mode: 'search' as AgentMode, label: '웹 검색으로 다시 실행' },
+        { mode: 'chat' as AgentMode, label: '대화로만 다시 실행' },
+      ]).filter((target) => target.mode !== overview.route.resolvedMode)
+    : [];
   return (
     <article className={expanded ? 'agent-overview expanded' : 'agent-overview'}>
       <button className="overview-header" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
         <div><span className="overview-brand"><BotSparkle24Filled /></span><span><strong>{overview.activity || overview.route.reason}</strong><small>{overview.route.skills.map((skill) => skill.name).join(' · ')}</small></span></div>
         <span className="overview-header-actions"><span className={`overview-status ${overview.status}`}>{statusLabel}</span><ChevronDown24Regular className={expanded ? 'chevron-open' : ''} /></span>
       </button>
+      {rerunTargets.length > 0 && <div className="overview-rerun">
+        <span>{answeredByLabel[overview.route.resolvedMode]}</span>
+        {rerunTargets.map((target) => (
+          <button key={target.mode} type="button" onClick={() => onRerun?.(overview.prompt, target.mode)}>
+            {target.label}
+          </button>
+        ))}
+      </div>}
       {expanded && <div className="overview-details">
         <div className="overview-skills"><span>사용 중인 skill</span>{overview.route.skills.map((skill) => <span className="skill-chip" key={skill.id}><PuzzlePiece24Regular />{skill.name}<small>{skill.risk}</small></span>)}</div>
         <div className="overview-timeline">
@@ -1479,6 +1499,14 @@ function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overvi
     </article>
   );
 }
+
+// Full sentences rather than a noun plus a particle, so the Korean josa stays correct.
+const answeredByLabel: Record<ResolvedAgentMode, string> = {
+  chat: '대화로 답했습니다',
+  search: '웹 검색으로 답했습니다',
+  page: '현재 페이지를 읽고 답했습니다',
+  'browser-agent': '브라우저를 조작해 답했습니다',
+};
 
 const effortOptions: Array<{ id: ReasoningEffort; label: string }> = [
   { id: 'auto', label: 'Auto' },

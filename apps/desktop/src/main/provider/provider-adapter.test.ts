@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { ClaudeCodeAdapter, claudeExecutableCandidates } from './claude-code-adapter';
 import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
+import { modelIdPattern, skillIdPattern } from './identifiers';
 import type { LocalRunStore } from '../storage/local-run-store';
 
 const unusedStore = {} as LocalRunStore;
@@ -59,6 +60,17 @@ test('Codex adapter locates current and legacy npm native executables', () => {
     join(vendorRoot, 'bin', 'codex.exe'),
     join(vendorRoot, 'codex', 'codex.exe'),
   ]);
+});
+
+test('model ids accept the bracketed context-window suffix while skill ids do not', () => {
+  // The Claude CLI exposes ids such as claude-fable-5[1m]; rejecting them broke every run.
+  assert.ok(modelIdPattern.test('claude-fable-5[1m]'));
+  assert.ok(modelIdPattern.test('sonnet'));
+  assert.ok(modelIdPattern.test('gpt-5.6-sol'));
+  assert.ok(!modelIdPattern.test('claude fable'));
+  assert.ok(!modelIdPattern.test('model;rm -rf /'));
+  assert.ok(!skillIdPattern.test('xgen.conversation[1m]'));
+  assert.ok(skillIdPattern.test('xgen.conversation'));
 });
 
 test('Codex adapter locates npm native executables inside a macOS npm prefix', () => {
