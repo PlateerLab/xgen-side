@@ -60,6 +60,31 @@ test('auto recognizes the Korean connective form for browser navigation', async 
   assert.equal(route.agentBrowserRequired, true);
 });
 
+test('auto routing caps full access at guard when it selects mutating skills', async () => {
+  const route = await router().route({
+    ...baseRequest, mode: 'auto', permissionMode: 'full-access',
+    prompt: 'example.com 열어서 로그인 폼에 입력해줘',
+  });
+  assert.equal(route.resolvedMode, 'browser-agent');
+  assert.match(route.cappedPermissionReason ?? '', /Guard/);
+});
+
+test('auto routing leaves full access alone for read-only skills', async () => {
+  const route = await router().route({
+    ...baseRequest, mode: 'auto', permissionMode: 'full-access', prompt: '재귀함수가 뭐야',
+  });
+  assert.equal(route.resolvedMode, 'chat');
+  assert.equal(route.cappedPermissionReason, undefined);
+});
+
+test('an explicitly chosen mode is the user consent signal and is never capped', async () => {
+  const route = await router().route({
+    ...baseRequest, mode: 'browser-agent', permissionMode: 'full-access',
+    prompt: 'example.com 열어서 로그인 폼에 입력해줘',
+  });
+  assert.equal(route.cappedPermissionReason, undefined);
+});
+
 test('auto routes screen-showing requests without a URL to browser navigation', async () => {
   const route = await router().route({ ...baseRequest, mode: 'auto', prompt: '네이버 화면을 보여줘' });
   assert.equal(route.resolvedMode, 'browser-agent');

@@ -1460,6 +1460,9 @@ function AgentOverview({ overview, onRerun }: { overview: NonNullable<ChatMessag
         <div><span className="overview-brand"><BotSparkle24Filled /></span><span><strong>{overview.activity || overview.route.reason}</strong><small>{overview.route.skills.map((skill) => skill.name).join(' · ')}</small></span></div>
         <span className="overview-header-actions"><span className={`overview-status ${overview.status}`}>{statusLabel}</span><ChevronDown24Regular className={expanded ? 'chevron-open' : ''} /></span>
       </button>
+      {overview.route.cappedPermissionReason && <div className="overview-capped" role="note">
+        <ShieldLock24Regular /><span>{overview.route.cappedPermissionReason}</span>
+      </div>}
       {rerunTargets.length > 0 && <div className="overview-rerun">
         <span>{answeredByLabel[overview.route.resolvedMode]}</span>
         {rerunTargets.map((target) => (

@@ -1351,3 +1351,18 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
   color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* Shown when Auto routing lowered the run's permission ceiling. Sits above the re-run
+   row so the reason is read before the offer to run it again. */
+.overview-capped {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 14px 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(197, 138, 20, 0.28);
+  border-radius: 10px;
+  background: rgba(233, 178, 45, 0.09);
+}
+.overview-capped svg { width: 14px; height: 14px; flex: 0 0 auto; color: #a97514; }
+.overview-capped span { color: var(--text-soft); font-size: 9px; line-height: 1.5; }

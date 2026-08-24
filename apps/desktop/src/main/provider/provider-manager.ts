@@ -27,6 +27,7 @@ import type { BrowserBridge, ProviderAdapter } from './provider-adapter';
 import { collect } from './provider-runtime';
 import { browserActionPolicy } from './browser-action-policy';
 import { modelIdPattern, skillIdPattern } from './identifiers';
+import { effectivePermissionMode } from './permission-ceiling';
 
 const runTimeoutMs = 15 * 60_000;
 
@@ -111,11 +112,13 @@ export class ProviderManager {
     let effectiveRequest: AgentRunRequest = {
       ...request,
       mode: route.resolvedMode,
+      permissionMode: effectivePermissionMode(request, Boolean(route.cappedPermissionReason)),
       reasoningEffort: resolveReasoningEffort(request, route),
     };
     await this.store.append(session, 'skills.routed', request.providerId, request.mode, {
       routeId: route.id,
       reason: route.reason,
+      cappedPermissionReason: route.cappedPermissionReason,
       skills: route.skills.map((skill) => ({ id: skill.id, settingKey: skill.settingKey, risk: skill.risk })),
       browserVisible: route.browserVisible,
       agentBrowserRequired: route.agentBrowserRequired,

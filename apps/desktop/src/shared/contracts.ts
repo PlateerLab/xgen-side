@@ -138,6 +138,8 @@ export interface SkillRoute {
   skills: RoutedSkill[];
   steps: SkillRouteStep[];
   blockedReason?: string;
+  /** Set when Auto routing reduced the run's permission ceiling; explains why. */
+  cappedPermissionReason?: string;
 }
 
 export interface ProviderStatus {

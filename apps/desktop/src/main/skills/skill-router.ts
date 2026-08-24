@@ -10,6 +10,7 @@ import type {
 } from '../../shared/contracts';
 import { LocalSettingsStore } from '../storage/local-settings-store';
 import { listSkillCatalog, loadSkillPackages, type LoadedSkillPackage } from './skill-package-loader';
+import { cappedPermissionReason } from '../provider/permission-ceiling';
 
 export class SkillRouter {
   private readonly packages: LoadedSkillPackage[];
@@ -80,6 +81,7 @@ export class SkillRouter {
       skills: skills.map(toRoutedSkill),
       steps: buildSteps(skills, targetHost, resolvedMode, agentBrowserRequired),
       blockedReason,
+      cappedPermissionReason: cappedPermissionReason(request, skills.map(toRoutedSkill)),
     };
   }
 }
