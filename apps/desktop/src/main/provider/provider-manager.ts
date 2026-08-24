@@ -291,6 +291,8 @@ export class ProviderManager {
       toolProfiles: [...new Set(route.skills.flatMap((skill) => skill.runtime.toolProfiles ?? []))],
       tabId: target.tab.id,
       targetId: target.targetId,
+      tabUrl: target.tab.url,
+      tabTitle: target.tab.title,
     };
   }
 }
@@ -372,11 +374,18 @@ function buildPrompt(
   if (route.resolvedMode === 'page') {
     return `${boundary}\n${skills}\nAnswer only from the attached page unless the user explicitly asks for outside research. Do not control the browser or modify files.${history}\n\n${pageBlock}\n\nUser request:\n${request.prompt}`;
   }
-  const startInstruction = browser?.targetId
-    ? `Start by listing tabs, then switch to the exact target id ${browser.targetId}. This is the run-owned visible XGEN Side tab.`
+  // The browser tools accept a `t<N>` id or a label, both of which the tab list reports.
+  // A CDP target id is not a tab reference on the shipped engine, so the run-owned tab is
+  // named by the URL and title that the tab list shows.
+  const runOwnedTab = browser?.tabUrl
+    ? `${browser.tabUrl}${browser.tabTitle ? ` titled "${browser.tabTitle}"` : ''}`
+    : undefined;
+  const tabReferenceRule = 'Tab references are the t<N> ids or labels reported by the tab list; no other identifier is accepted.';
+  const startInstruction = runOwnedTab
+    ? `Start by listing tabs and switch to the run-owned visible XGEN Side tab, which is already open at ${runOwnedTab}. ${tabReferenceRule} Work in that tab instead of opening another one for the same page.`
     : page
-      ? `Start by listing tabs and select the tab whose URL is ${page.url}.`
-      : 'Start by listing tabs and use the active run-owned tab, opening a new URL only when required.';
+      ? `Start by listing tabs and select the tab whose URL is ${page.url}. ${tabReferenceRule}`
+      : `Start by listing tabs and use the active run-owned tab, opening a new URL only when required. ${tabReferenceRule}`;
   const permissionInstruction = request.permissionMode === 'read-only'
     ? 'This run is read-only. Navigation and inspection are allowed, but do not click page controls, type, fill, submit, upload, download, or change remote data.'
     : request.permissionMode === 'full-access'

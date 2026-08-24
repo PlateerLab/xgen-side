@@ -12,6 +12,8 @@ export interface BrowserBridge {
   toolProfiles: string[];
   tabId: string;
   targetId?: string;
+  tabUrl?: string;
+  tabTitle?: string;
 }
 
 export interface ProviderRunPlan {

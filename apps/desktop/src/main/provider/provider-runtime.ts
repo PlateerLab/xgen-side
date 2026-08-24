@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access } from 'node:fs/promises';
+import { access, stat } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 
 const maxOutputBytes = 8_000_000;
@@ -177,7 +177,7 @@ export function collect(
         listener?.(line);
         if (target === 'stdout' && !outputCompleted && options.stopAfterStdoutLine?.(line)) {
           outputCompleted = true;
-          terminateProcessTree(child.pid);
+          terminateProcessTree(child);
           forceFinishTimer = setTimeout(() => finish({ exitCode: 0, stdout, stderr, cancelled: false }), 1_500);
         }
       }
@@ -196,11 +196,11 @@ export function collect(
     child.once('error', (error) => finish({ exitCode: 1, stdout, stderr: `${stderr}${error.message}`, cancelled }));
     timer = setTimeout(() => {
       timedOut = true;
-      terminateProcessTree(child.pid);
+      terminateProcessTree(child);
     }, timeoutMs);
     const abort = (): void => {
       cancelled = true;
-      terminateProcessTree(child.pid);
+      terminateProcessTree(child);
       forceFinishTimer = setTimeout(() => finish({ exitCode: 1, stdout, stderr, cancelled: true }), 1_500);
     };
     options.signal?.addEventListener('abort', abort, { once: true });
@@ -232,6 +232,7 @@ async function executablesOnPath(name: string): Promise<string[]> {
     if (!directory) continue;
     const candidate = join(directory, name);
     try {
+      if (!(await stat(candidate)).isFile()) continue;
       await access(candidate, constants.X_OK);
       found.push(candidate);
     } catch {
@@ -241,7 +242,8 @@ async function executablesOnPath(name: string): Promise<string[]> {
   return found;
 }
 
-function terminateProcessTree(pid: number | undefined): void {
+function terminateProcessTree(child: ChildProcess): void {
+  const pid = child.pid;
   if (!pid) return;
   if (process.platform === 'win32') {
     const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
@@ -253,7 +255,12 @@ function terminateProcessTree(pid: number | undefined): void {
     return;
   }
   if (!signalProcessTree(pid, 'SIGTERM')) return;
-  setTimeout(() => signalProcessTree(pid, 'SIGKILL'), 2_000).unref();
+  // Escalate only while this child is still alive. Its pid, and with it the process
+  // group id, can be reassigned to an unrelated process the moment it exits, and a
+  // late SIGKILL would then land outside this run.
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) signalProcessTree(pid, 'SIGKILL');
+  }, 2_000).unref();
 }
 
 /**
