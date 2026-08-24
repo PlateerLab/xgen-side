@@ -842,8 +842,10 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 }
 .mode-select > svg:last-child { position: absolute; right: 7px; width: 13px; height: 13px; pointer-events: none; }
 .mode-select select { height: 100%; padding: 0 25px 0 0; appearance: none; border: 0; outline: 0; color: var(--text); background: transparent; cursor: pointer; font-size: 10px; font-weight: 720; }
-.composer-tools { min-height: 35px; align-items: center; padding-top: 2px; }
+.composer-tools { min-height: 35px; flex-wrap: wrap; align-items: center; padding-top: 2px; }
 .composer-context-tools, .composer-options { display: flex; min-width: 0; align-items: center; gap: 3px; }
+.composer-context-tools { flex: 1 1 auto; overflow: hidden; }
+.composer-options { flex: 0 0 auto; margin-left: auto; }
 .context-chip {
   display: inline-flex;
   height: 28px;
@@ -862,7 +864,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .skill-run-select > svg:first-child { position: static; width: 13px; height: 13px; }
 .skill-run-select > svg:last-child { position: absolute; right: 5px; width: 11px; height: 11px; pointer-events: none; }
 .skill-run-select select { min-width: 92px; max-width: 140px; height: 100%; padding: 0 20px 0 2px; overflow: hidden; appearance: none; border: 0; outline: 0; color: inherit; background: transparent; cursor: pointer; font-size: 9px; font-weight: 700; text-overflow: ellipsis; }
-.mode-boundary-hint { margin-right: 2px; padding: 0 6px; color: var(--text-soft); font-size: 9px; font-weight: 650; white-space: nowrap; }
+.mode-boundary-hint { min-width: 0; margin-right: 2px; padding: 0 6px; overflow: hidden; color: var(--text-soft); font-size: 9px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
 .compact-select { height: 30px; border-color: transparent; background: transparent; box-shadow: none; }
 .compact-select:hover { background: var(--surface-muted); }
 .compact-select select { max-width: 128px; padding-right: 24px; padding-left: 7px; font-size: 10px; }
@@ -1110,7 +1112,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .browser-snapshot-card > header strong { font-size: 9px; }
 .browser-snapshot-card > header small { margin-top: 3px; color: var(--text-faint); font-size: 8px; }
 .browser-snapshot-card > header b { display: grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; border-radius: 7px; color: var(--accent); background: var(--accent-soft); font-size: 8px; }
-.browser-snapshot-card img { display: block; width: 100%; aspect-ratio: 16 / 10; border-block: 1px solid var(--border); object-fit: cover; object-position: top; background: var(--surface-muted); }
+.browser-snapshot-card img { display: block; width: 100%; height: auto; max-height: 520px; border-block: 1px solid var(--border); object-fit: contain; object-position: top; background: var(--surface-muted); }
 .browser-snapshot-card > footer { color: var(--text-soft); font-size: 8px; }
 .browser-snapshot-card > footer time { color: var(--text-faint); }
 .snapshot-empty { display: flex; min-height: 180px; align-items: center; justify-content: center; gap: 9px; padding: 24px; border: 1px dashed var(--border-strong); border-radius: 11px; color: var(--text-faint); }
