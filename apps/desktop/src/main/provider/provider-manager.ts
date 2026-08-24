@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { shell } from 'electron';
@@ -285,7 +286,10 @@ export class ProviderManager {
         AGENT_BROWSER_MAX_OUTPUT: '50000',
         AGENT_BROWSER_ACTION_POLICY: policyPath,
         AGENT_BROWSER_NAMESPACE: `xgen-side-${this.cdpPort}`,
-        AGENT_BROWSER_SESSION: `xgen-side-${runId.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80)}`,
+        // The engine names a Unix socket after this value; macOS caps socket paths
+        // at 104 bytes, so a full run id pushes the path over the limit. A short
+        // digest keeps the session unique per run and the path well under the cap.
+        AGENT_BROWSER_SESSION: `xgen-side-${createHash('sha256').update(runId).digest('hex').slice(0, 12)}`,
         ...(approval ? { XGEN_APPROVAL_BROKER: approval.address, XGEN_APPROVAL_TOKEN: approval.token, XGEN_APPROVAL_RUN_ID: runId } : {}),
       },
       toolProfiles: [...new Set(route.skills.flatMap((skill) => skill.runtime.toolProfiles ?? []))],
@@ -332,7 +336,7 @@ function validateRunRequest(request: AgentRunRequest): void {
   }
 }
 
-function resolveReasoningEffort(request: AgentRunRequest, route: SkillRoute): 'low' | 'medium' | 'high' | 'xhigh' {
+function resolveReasoningEffort(request: AgentRunRequest, route: SkillRoute): 'low' | 'medium' | 'high' | 'xhigh' | 'max' {
   if (request.reasoningEffort && request.reasoningEffort !== 'auto') return request.reasoningEffort;
   if (route.resolvedMode === 'browser-agent') return 'high';
   if (route.skills.some((skill) => skill.id === 'xgen.multi-page-research')) return 'high';

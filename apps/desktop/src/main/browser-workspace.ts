@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, type WebContents } from 'electron';
+import { BrowserWindow, WebContentsView, nativeImage, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { normalizeBrowserAddress } from './browser-address';
 import type { BrowserAgentStatus, BrowserHistoryEntry, BrowserLayoutState, BrowserSnapshot, BrowserTabOwner, BrowserTabState, PageContext } from '../shared/contracts';
@@ -397,8 +397,14 @@ export class BrowserWorkspace {
     }
     try {
       await delay(80);
-      const image = await withTimeout(tab.view.webContents.capturePage(), 2_500);
-      if (!image || image.isEmpty()) return undefined;
+      // Pages lay out wider than the temporarily attached view; capture the full
+      // content box over CDP so a narrow viewport still yields the whole page.
+      let imageDataUrl = await withTimeout(captureFullContent(tab.view.webContents), 4_000);
+      if (!imageDataUrl) {
+        const image = await withTimeout(tab.view.webContents.capturePage(), 2_500);
+        if (!image || image.isEmpty()) return undefined;
+        imageDataUrl = image.toDataURL();
+      }
       return {
         id: randomUUID(),
         tabId: tab.id,
@@ -406,7 +412,7 @@ export class BrowserWorkspace {
         url: tab.url,
         capturedAt: new Date().toISOString(),
         reason,
-        imageDataUrl: image.toDataURL(),
+        imageDataUrl,
       };
     } finally {
       if (temporarilyAttached) {
@@ -443,6 +449,41 @@ function isAllowedBrowserUrl(url: string): boolean {
     return protocol === 'http:' || protocol === 'https:' || protocol === 'about:';
   } catch {
     return false;
+  }
+}
+
+/**
+ * Captures the page's full content box, including the area outside a narrow
+ * viewport, through the Chrome DevTools protocol. Returns undefined so callers
+ * can fall back to the plain viewport capture.
+ */
+async function captureFullContent(contents: Electron.WebContents): Promise<string | undefined> {
+  if (contents.isDestroyed()) return undefined;
+  const attachedHere = !contents.debugger.isAttached();
+  try {
+    if (attachedHere) contents.debugger.attach('1.3');
+    const metrics = await contents.debugger.sendCommand('Page.getLayoutMetrics') as unknown;
+    if (!isRecord(metrics)) return undefined;
+    const content = isRecord(metrics.cssContentSize) ? metrics.cssContentSize : metrics.contentSize;
+    if (!isRecord(content) || typeof content.width !== 'number' || typeof content.height !== 'number') return undefined;
+    const width = Math.min(Math.max(Math.ceil(content.width), 320), 1600);
+    const height = Math.min(Math.max(Math.ceil(content.height), 240), 3200);
+    const shot = await contents.debugger.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width, height, scale: 1 },
+    }) as unknown;
+    if (!isRecord(shot) || typeof shot.data !== 'string' || !shot.data) return undefined;
+    // A full-page retina PNG easily exceeds 2MB, which is heavy for the event stream
+    // and the run store. Downscale and re-encode as JPEG before it leaves this process.
+    const image = nativeImage.createFromBuffer(Buffer.from(shot.data, 'base64'));
+    if (image.isEmpty()) return undefined;
+    const scaled = image.getSize().width > 1400 ? image.resize({ width: 1400 }) : image;
+    return `data:image/jpeg;base64,${scaled.toJPEG(80).toString('base64')}`;
+  } catch {
+    return undefined;
+  } finally {
+    if (attachedHere && contents.debugger.isAttached()) contents.debugger.detach();
   }
 }
 

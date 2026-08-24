@@ -39,6 +39,7 @@ import { isRunLinkedTab, messagesForAgentTab } from './agent-run-link';
 import type {
   AgentMode,
   AgentPermissionMode,
+  ReasoningEffort,
   AgentRunEvent,
   AgentRunHandle,
   AppSettings,
@@ -168,6 +169,7 @@ export function App(): ReactElement {
   const [homeSelectedSkillId, setHomeSelectedSkillId] = useState('');
   const [pageMode, setPageMode] = useState<AgentMode>('auto');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>('guard');
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('auto');
   const [pageRoute, setPageRoute] = useState<SkillRoute>();
   const [homePrompt, setHomePrompt] = useState('');
   const [pagePrompt, setPagePrompt] = useState('');
@@ -394,7 +396,7 @@ export function App(): ReactElement {
       providerId,
       model,
       mode: homeMode,
-      reasoningEffort: 'auto' as const,
+      reasoningEffort,
       prompt: value,
       history: homeMessages.filter((message) => !message.overview).map(({ role, content }) => ({ role, content })),
       selectedSkillIds: homeSelectedSkillId ? [homeSelectedSkillId] : undefined,
@@ -492,7 +494,7 @@ export function App(): ReactElement {
         providerId,
         model,
         mode: pageMode,
-        reasoningEffort: 'auto' as const,
+        reasoningEffort,
         prompt: value,
         pageContext,
         history: pageMessages.map(({ role, content }) => ({ role, content })),
@@ -632,6 +634,8 @@ export function App(): ReactElement {
           permissionMode={permissionMode}
           onChangeMode={setHomeMode}
           onChangePermissionMode={changePermissionMode}
+          reasoningEffort={reasoningEffort}
+          onChangeReasoningEffort={setReasoningEffort}
           onChangeModel={setModel}
           onChangePrompt={setHomePrompt}
           onChangeProvider={changeProvider}
@@ -725,6 +729,8 @@ export function App(): ReactElement {
           permissionMode={permissionMode}
           onChangeMode={setPageMode}
           onChangePermissionMode={changePermissionMode}
+          reasoningEffort={reasoningEffort}
+          onChangeReasoningEffort={setReasoningEffort}
           onChangeModel={setModel}
           onChangePrompt={setPagePrompt}
           onChangeProvider={changeProvider}
@@ -856,9 +862,11 @@ interface ConversationSurfaceProps {
   mode: AgentMode;
   model: string;
   permissionMode: AgentPermissionMode;
+  reasoningEffort: ReasoningEffort;
   onChangeMode(value: AgentMode): void;
   onChangePermissionMode(value: AgentPermissionMode): void;
   onChangeModel(value: string): void;
+  onChangeReasoningEffort(value: ReasoningEffort): void;
   onChangePrompt(value: string): void;
   onChangeProvider(value: ProviderId): void;
   onCancel(): void;
@@ -1467,6 +1475,15 @@ function AgentOverview({ overview }: { overview: NonNullable<ChatMessage['overvi
   );
 }
 
+const effortOptions: Array<{ id: ReasoningEffort; label: string }> = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra High' },
+  { id: 'max', label: 'Max' },
+];
+
 function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMode; label: string }>; placeholder: string }): ReactElement {
   const models = props.selectedProvider?.models ?? [];
   const modeHint: Record<AgentMode, string> = {
@@ -1499,6 +1516,7 @@ function Composer(props: ConversationSurfaceProps & { modes: Array<{ id: AgentMo
           <label className={`permission-mode-select permission-${props.permissionMode}`}><ShieldLock24Regular /><span className="sr-only">Agent 권한</span><select value={props.permissionMode} onChange={(event) => props.onChangePermissionMode(event.target.value as AgentPermissionMode)}><option value="read-only">Read only</option><option value="guard">Guard</option><option value="full-access">Full access</option></select><ChevronDown24Regular /></label>
           <label className="compact-select provider-select"><BotSparkle24Filled /><span className="sr-only">Provider</span><select value={props.providerId} onChange={(event) => props.onChangeProvider(event.target.value as ProviderId)}>{props.providers.map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.available}>{provider.id === 'codex' ? 'OpenAI' : 'Claude'}</option>)}</select><ChevronDown24Regular /></label>
           <label className="compact-select model-select"><span className="sr-only">Model</span><select value={props.model} onChange={(event) => props.onChangeModel(event.target.value)}>{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label>
+          {props.selectedProvider?.supportsReasoningEffort ? <label className="compact-select effort-select"><span className="sr-only">Reasoning</span><select value={props.reasoningEffort} onChange={(event) => props.onChangeReasoningEffort(event.target.value as ReasoningEffort)}>{effortOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select><ChevronDown24Regular /></label> : null}
           <button type="button" className="icon-button compact composer-mic" aria-label="음성 입력"><Mic24Regular /></button>
           {props.busy && <button type="button" className="send-button stop-button" onClick={props.onCancel} aria-label="실행 중지"><Dismiss24Regular /></button>}
         </div>

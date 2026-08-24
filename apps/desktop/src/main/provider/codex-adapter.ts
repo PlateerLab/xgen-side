@@ -69,7 +69,9 @@ export class CodexAdapter implements ProviderAdapter {
       '--skip-git-repo-check',
     ];
     if (request.reasoningEffort && request.reasoningEffort !== 'auto') {
-      args.push('-c', `model_reasoning_effort=${JSON.stringify(request.reasoningEffort)}`);
+      // Codex's catalog accepts none/low/medium/high/xhigh; map 'max' to its ceiling.
+      const effort = request.reasoningEffort === 'max' ? 'xhigh' : request.reasoningEffort;
+      args.push('-c', `model_reasoning_effort=${JSON.stringify(effort)}`);
     }
     if (request.mode === 'search') args.push('-c', 'web_search="live"');
     const extraEnvironment: Record<string, string> = { CODEX_HOME: home };

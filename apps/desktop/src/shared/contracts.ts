@@ -63,7 +63,7 @@ export interface EngineStatus {
 export type ProviderId = 'codex' | 'claude';
 export type ResolvedAgentMode = 'chat' | 'search' | 'page' | 'browser-agent';
 export type AgentMode = 'auto' | ResolvedAgentMode;
-export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type AgentRunSource = 'chat' | 'browser-side';
 export type BrowserTargetPreference = 'new-agent-tab' | 'current-tab';
 export type AgentPermissionMode = 'read-only' | 'guard' | 'full-access';

@@ -496,7 +496,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .agent-panel .composer-tools { align-items: flex-end; justify-content: flex-end; }
 .agent-panel .composer-tools > .icon-button,
 .agent-panel .composer-options > .icon-button { display: none; }
-.agent-panel .composer-options { width: 100%; justify-content: flex-end; gap: 4px; }
+.agent-panel .composer-options { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .agent-panel .compact-select select { padding-right: 22px; padding-left: 7px; }
 .agent-panel .permission-mode-select select { max-width: 82px; }
 .agent-panel .provider-select select { max-width: 72px; }
@@ -842,10 +842,20 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 }
 .mode-select > svg:last-child { position: absolute; right: 7px; width: 13px; height: 13px; pointer-events: none; }
 .mode-select select { height: 100%; padding: 0 25px 0 0; appearance: none; border: 0; outline: 0; color: var(--text); background: transparent; cursor: pointer; font-size: 10px; font-weight: 720; }
-.composer-tools { min-height: 35px; flex-wrap: wrap; align-items: center; padding-top: 2px; }
+.composer { container-type: inline-size; }
+.composer-tools { min-height: 35px; padding-top: 2px; gap: 10px; }
 .composer-context-tools, .composer-options { display: flex; min-width: 0; align-items: center; gap: 3px; }
 .composer-context-tools { flex: 1 1 auto; overflow: hidden; }
-.composer-options { flex: 0 0 auto; margin-left: auto; }
+.composer-options { flex: 0 0 auto; }
+/* The tools stay on one row; below these widths the decorative pieces yield first. */
+@container (max-width: 740px) {
+  .mode-boundary-hint { display: none; }
+}
+@container (max-width: 620px) {
+  .composer-tools .context-chip { display: none; }
+  .composer-mic { display: none; }
+  .skill-run-select select { min-width: 0; max-width: 96px; }
+}
 .context-chip {
   display: inline-flex;
   height: 28px;

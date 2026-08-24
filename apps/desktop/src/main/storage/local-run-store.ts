@@ -35,6 +35,8 @@ interface RunEvent {
 }
 
 export class LocalRunStore {
+  private eventWriteQueue: Promise<unknown> = Promise.resolve();
+
   private readonly root: string;
   private readonly sessionsRoot: string;
   private readonly providersRoot: string;
@@ -163,7 +165,11 @@ export class LocalRunStore {
       mode,
       payload: payload ? redact(payload) : undefined,
     };
-    await appendFile(session.eventsPath, `${JSON.stringify(event)}\n`, 'utf8');
+    // appendFile calls are not atomic for large payloads (a multi-megabyte snapshot
+    // interleaved with the next event corrupts the JSONL), so writes are serialized.
+    const write = this.eventWriteQueue.then(() => appendFile(session.eventsPath, `${JSON.stringify(event)}\n`, 'utf8'));
+    this.eventWriteQueue = write.catch(() => undefined);
+    await write;
   }
 
   async writeProviderOutput(session: RunSession, stdout: string, stderr: string): Promise<void> {

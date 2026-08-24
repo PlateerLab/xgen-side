@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
@@ -6,7 +6,7 @@ import { LocalRunStore, type RunSession } from '../storage/local-run-store';
 import type { BrowserBridge, ProviderAdapter, ProviderRunPlan, ProviderStreamEvent } from './provider-adapter';
 import { authError, collect, launchLoginTerminal, locateNativeExecutable, safeEnvironment } from './provider-runtime';
 
-const models = [
+const fallbackModels = [
   { id: 'sonnet', label: 'Claude Sonnet' },
   { id: 'opus', label: 'Claude Opus' },
   { id: 'haiku', label: 'Claude Haiku' },
@@ -33,8 +33,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       subscriptionAuth: true,
       version: executable?.version,
       executablePath: executable?.path,
-      models,
-      supportsReasoningEffort: false,
+      models: executable ? await listClaudeModels(executable.path, home) : fallbackModels,
+      supportsReasoningEffort: true,
       error: executable ? authError(auth, 'Claude 로그인이 필요합니다.') : 'Claude Code CLI를 찾지 못했습니다.',
       complianceNotice: '로컬 사용자가 직접 설치·로그인한 공식 Claude Code CLI만 실행합니다. 호스팅·공유형 배포는 Anthropic API 또는 별도 승인이 필요합니다.',
     };
@@ -67,6 +67,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       '--include-partial-messages',
       '--verbose',
       '--model', request.model,
+      ...(request.reasoningEffort && request.reasoningEffort !== 'auto' ? ['--effort', request.reasoningEffort] : []),
       '--permission-mode', browser ? 'default' : 'plan',
       '--disallowedTools', request.mode === 'search'
         ? 'Bash,Edit,Write,NotebookEdit'
@@ -199,4 +200,56 @@ export function claudeExecutableCandidates(
   if (platform === 'darwin') candidates.push(join('/opt', 'homebrew', 'bin', 'claude'));
   candidates.push(join('/usr', 'local', 'bin', 'claude'));
   return candidates;
+}
+
+/**
+ * Builds the selectable model list from the installed CLI. Claude Code has no model
+ * list command, so this combines the aliases documented by `--model` in the installed
+ * version's help output with the account-specific models the CLI caches in
+ * `.claude.json` (`additionalModelOptionsCache`). Falls back to the well-known aliases.
+ */
+export async function listClaudeModels(
+  executablePath: string,
+  home: string,
+): Promise<Array<{ id: string; label: string }>> {
+  const models: Array<{ id: string; label: string }> = [];
+  const seen = new Set<string>();
+  const push = (id: string, label: string): void => {
+    const key = label.trim().toLowerCase().replace(/^claude\s+/, '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    models.push({ id, label });
+  };
+
+  try {
+    const cache = JSON.parse(await readFile(join(home, '.claude.json'), 'utf8')) as {
+      additionalModelOptionsCache?: Array<{ value?: unknown; label?: unknown }>;
+    };
+    for (const entry of cache.additionalModelOptionsCache ?? []) {
+      if (typeof entry.value === 'string' && typeof entry.label === 'string' && entry.value) {
+        push(entry.value, `Claude ${entry.label}`);
+      }
+    }
+  } catch {
+    // The cache appears after the first login; aliases still apply.
+  }
+
+  for (const alias of await claudeModelAliases(executablePath)) {
+    push(alias, `Claude ${alias.charAt(0).toUpperCase()}${alias.slice(1)}`);
+  }
+
+  return models.length ? models : fallbackModels;
+}
+
+async function claudeModelAliases(executablePath: string): Promise<string[]> {
+  const aliases = new Set<string>();
+  try {
+    const help = await collect(executablePath, ['--help'], process.cwd(), undefined, 10_000);
+    const modelSection = /alias for the latest model[^)]*\)/i.exec(help.stdout)?.[0] ?? '';
+    for (const [, alias] of modelSection.matchAll(/'([a-z][a-z0-9-]*)'/g)) if (alias) aliases.add(alias);
+  } catch {
+    // Help output is best-effort; the fallback aliases below still apply.
+  }
+  for (const alias of ['opus', 'sonnet', 'haiku']) aliases.add(alias);
+  return [...aliases];
 }
