@@ -390,6 +390,8 @@ export class ProviderManager {
       toolProfiles,
       tabId: target.tab.id,
       targetId: target.targetId,
+      tabUrl: target.tab.url,
+      tabTitle: target.tab.title,
     };
   }
 }

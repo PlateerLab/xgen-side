@@ -29,6 +29,12 @@ export function agentBrowserBinaryName(platform: DesktopPlatform, architecture: 
   return `agent-browser-${platform}-${architecture}${extension}`;
 }
 
+export function agentBrowserBinaryNames(platform: DesktopPlatform, architecture: DesktopArchitecture): string[] {
+  const names = [agentBrowserBinaryName(platform, architecture)];
+  if (platform === 'win32' && architecture === 'arm64') names.push(agentBrowserBinaryName(platform, 'x64'));
+  return names;
+}
+
 export function xgenDaemonBinaryName(platform: DesktopPlatform, architecture: DesktopArchitecture): string {
   const extension = platform === 'win32' ? '.exe' : '';
   return `xgen-daemon-${platform}-${architecture}${extension}`;
@@ -74,7 +80,7 @@ export function loginTerminalLaunchSpec(platform: DesktopPlatform, options: Logi
     `export ${options.homeEnvironmentName}=${shellQuote(options.cwd)}`,
     `exec ${shellQuote(options.executablePath)} ${options.args.map(shellQuote).join(' ')}`,
   ].join(' && ');
-  const script = `tell application "Terminal" to do script "${appleScriptString(shellCommand)}"`;
+  const script = `tell application "Terminal"\nactivate\ndo script "${appleScriptString(shellCommand)}"\nend tell`;
   return { command: '/usr/bin/osascript', args: ['-e', script] };
 }
 
@@ -82,7 +88,7 @@ export function inheritedEnvironmentNames(platform: DesktopPlatform): string[] {
   const shared = ['PATH', 'TEMP', 'TMP', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'CODEX_CA_CERTIFICATE', 'SSL_CERT_FILE', 'LANG', 'LC_ALL'];
   return platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'COMSPEC', ...shared]
-    : ['HOME', 'USER', 'SHELL', 'TMPDIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', ...shared];
+    : ['HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', ...shared];
 }
 
 function powerShellQuote(value: string): string {

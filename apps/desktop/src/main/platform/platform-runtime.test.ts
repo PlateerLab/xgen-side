@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agentBrowserBinaryName, executableCandidatesFromPath, inheritedEnvironmentNames, loginTerminalLaunchSpec, xgenDaemonBinaryName } from './platform-runtime';
+import { agentBrowserBinaryName, agentBrowserBinaryNames, executableCandidatesFromPath, inheritedEnvironmentNames, loginTerminalLaunchSpec, xgenDaemonBinaryName } from './platform-runtime';
 
 test('selects the packaged browser engine for macOS and Windows', () => {
   assert.equal(agentBrowserBinaryName('darwin', 'arm64'), 'agent-browser-darwin-arm64');
   assert.equal(agentBrowserBinaryName('darwin', 'x64'), 'agent-browser-darwin-x64');
   assert.equal(agentBrowserBinaryName('win32', 'arm64'), 'agent-browser-win32-arm64.exe');
   assert.equal(agentBrowserBinaryName('win32', 'x64'), 'agent-browser-win32-x64.exe');
+  assert.deepEqual(agentBrowserBinaryNames('win32', 'arm64'), ['agent-browser-win32-arm64.exe', 'agent-browser-win32-x64.exe']);
+  assert.deepEqual(agentBrowserBinaryNames('darwin', 'arm64'), ['agent-browser-darwin-arm64']);
   assert.equal(xgenDaemonBinaryName('darwin', 'arm64'), 'xgen-daemon-darwin-arm64');
   assert.equal(xgenDaemonBinaryName('win32', 'x64'), 'xgen-daemon-win32-x64.exe');
 });

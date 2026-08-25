@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EngineStatus } from '../../shared/contracts';
-import { agentBrowserBinaryName, currentDesktopArchitecture, currentDesktopPlatform } from '../platform/platform-runtime';
+import { agentBrowserBinaryNames, currentDesktopArchitecture, currentDesktopPlatform } from '../platform/platform-runtime';
 
 export class AgentBrowserClient {
   constructor(
@@ -32,13 +32,18 @@ export class AgentBrowserClient {
   }
 
   private async findExecutable(): Promise<string | undefined> {
-    const binaryName = agentBrowserBinaryName(currentDesktopPlatform(), currentDesktopArchitecture());
-    const candidates = [
-      join(process.cwd(), 'bin', binaryName),
-      join(process.cwd(), '..', '..', 'bin', binaryName),
-      join(this.appPath, '..', '..', 'bin', binaryName),
-      join(this.resourcesPath, 'engine', binaryName),
+    const platform = currentDesktopPlatform();
+    const architecture = currentDesktopArchitecture();
+    const binaryNames = agentBrowserBinaryNames(platform, architecture);
+    const directories = [
+      join(process.cwd(), 'bin'),
+      join(process.cwd(), '..', '..', 'bin'),
+      join(this.appPath, '..', '..', 'bin'),
+      join(this.resourcesPath, 'engine'),
     ];
+    const candidates = directories.flatMap((directory) =>
+      binaryNames.map((name) => join(directory, name)),
+    );
 
     for (const candidate of candidates) {
       try {

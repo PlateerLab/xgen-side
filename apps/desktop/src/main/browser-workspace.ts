@@ -123,6 +123,10 @@ export class BrowserWorkspace {
     this.attachTabEvents(tab);
     this.activateTab(id);
     await view.webContents.loadURL(normalizeBrowserAddress(url));
+    // Report the loaded page instead of the placeholder title and about:blank, so a run
+    // that names its own tab describes it the way the browser tools list it.
+    tab.url = view.webContents.getURL() || tab.url;
+    tab.title = view.webContents.getTitle() || tab.url;
     return tab;
   }
 
