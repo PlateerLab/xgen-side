@@ -4,6 +4,7 @@ import test from 'node:test';
 import { ClaudeCodeAdapter, claudeExecutableCandidates } from './claude-code-adapter';
 import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
 import { modelIdPattern, skillIdPattern } from './identifiers';
+import { cappedPermissionReason, effectivePermissionMode } from './permission-ceiling';
 import type { LocalRunStore } from '../storage/local-run-store';
 
 const unusedStore = {} as LocalRunStore;
@@ -60,6 +61,25 @@ test('Codex adapter locates current and legacy npm native executables', () => {
     join(vendorRoot, 'bin', 'codex.exe'),
     join(vendorRoot, 'codex', 'codex.exe'),
   ]);
+});
+
+test('the permission ceiling can only lower a run, never raise it', () => {
+  // Guard is wider than read-only, so a capped read-only run must stay read-only.
+  assert.equal(effectivePermissionMode({ permissionMode: 'read-only' }, true), 'read-only');
+  assert.equal(effectivePermissionMode({ permissionMode: 'guard' }, true), 'guard');
+  assert.equal(effectivePermissionMode({ permissionMode: 'full-access' }, true), 'guard');
+  assert.equal(effectivePermissionMode({ permissionMode: 'full-access' }, false), 'full-access');
+  assert.equal(effectivePermissionMode({}, true), 'guard');
+});
+
+test('only an auto-routed full-access run is capped', () => {
+  const mutating = [{ id: 'x', name: 'Browser Interaction', risk: 'write' } as never];
+  const readOnly = [{ id: 'y', name: 'Conversation', risk: 'read' } as never];
+  assert.ok(cappedPermissionReason({ mode: 'auto', permissionMode: 'full-access' }, mutating));
+  assert.equal(cappedPermissionReason({ mode: 'auto', permissionMode: 'full-access' }, readOnly), undefined);
+  assert.equal(cappedPermissionReason({ mode: 'auto', permissionMode: 'guard' }, mutating), undefined);
+  assert.equal(cappedPermissionReason({ mode: 'auto', permissionMode: 'read-only' }, mutating), undefined);
+  assert.equal(cappedPermissionReason({ mode: 'browser-agent', permissionMode: 'full-access' }, mutating), undefined);
 });
 
 test('model ids accept the bracketed context-window suffix while skill ids do not', () => {

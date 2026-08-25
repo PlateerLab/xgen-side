@@ -33,8 +33,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       subscriptionAuth: true,
       version: executable?.version,
       executablePath: executable?.path,
-      models: executable ? await listClaudeModels(executable.path, home) : fallbackModels,
-      supportsReasoningEffort: true,
+      models: executable ? await listClaudeModels(executable.path, home, executable.version) : fallbackModels,
+      supportsReasoningEffort: executable ? (await claudeCapabilities(executable)).supportsEffort : false,
       error: executable ? authError(auth, 'Claude 로그인이 필요합니다.') : 'Claude Code CLI를 찾지 못했습니다.',
       complianceNotice: '로컬 사용자가 직접 설치·로그인한 공식 Claude Code CLI만 실행합니다. 호스팅·공유형 배포는 Anthropic API 또는 별도 승인이 필요합니다.',
     };
@@ -61,13 +61,17 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     const executable = await this.locate();
     if (!executable) throw new Error('Claude Code CLI를 찾지 못했습니다.');
     const home = await this.prepareHome();
+    const { supportsEffort } = await claudeCapabilities(executable);
+    const effort = supportsEffort && request.reasoningEffort && request.reasoningEffort !== 'auto'
+      ? request.reasoningEffort
+      : undefined;
     const args = [
       '-p',
       '--output-format', 'stream-json',
       '--include-partial-messages',
       '--verbose',
       '--model', request.model,
-      ...(request.reasoningEffort && request.reasoningEffort !== 'auto' ? ['--effort', request.reasoningEffort] : []),
+      ...(effort ? ['--effort', effort] : []),
       '--permission-mode', browser ? 'default' : 'plan',
       '--disallowedTools', request.mode === 'search'
         ? 'Bash,Edit,Write,NotebookEdit'
@@ -211,6 +215,7 @@ export function claudeExecutableCandidates(
 export async function listClaudeModels(
   executablePath: string,
   home: string,
+  version = '',
 ): Promise<Array<{ id: string; label: string }>> {
   const models: Array<{ id: string; label: string }> = [];
   const seen = new Set<string>();
@@ -234,22 +239,47 @@ export async function listClaudeModels(
     // The cache appears after the first login; aliases still apply.
   }
 
-  for (const alias of await claudeModelAliases(executablePath)) {
+  for (const alias of (await claudeCapabilities({ path: executablePath, version })).aliases) {
     push(alias, `Claude ${alias.charAt(0).toUpperCase()}${alias.slice(1)}`);
   }
 
   return models.length ? models : fallbackModels;
 }
 
-async function claudeModelAliases(executablePath: string): Promise<string[]> {
+interface ClaudeCapabilities {
+  aliases: string[];
+  supportsEffort: boolean;
+}
+
+/**
+ * Reads what the installed CLI actually accepts. The user owns their Claude Code
+ * install, so passing a flag an older build does not know ("error: unknown option")
+ * would fail every run. Cached per executable and version, so an upgrade in place is
+ * picked up without restarting the app.
+ */
+const capabilityCache = new Map<string, Promise<ClaudeCapabilities>>();
+
+export function claudeCapabilities(executable: { path: string; version: string }): Promise<ClaudeCapabilities> {
+  const key = `${executable.path}@${executable.version}`;
+  const cached = capabilityCache.get(key);
+  if (cached) return cached;
+  const probe = readClaudeCapabilities(executable.path);
+  capabilityCache.set(key, probe);
+  return probe;
+}
+
+async function readClaudeCapabilities(executablePath: string): Promise<ClaudeCapabilities> {
   const aliases = new Set<string>();
+  let supportsEffort = false;
   try {
     const help = await collect(executablePath, ['--help'], process.cwd(), undefined, 10_000);
     const modelSection = /alias for the latest model[^)]*\)/i.exec(help.stdout)?.[0] ?? '';
     for (const [, alias] of modelSection.matchAll(/'([a-z][a-z0-9-]*)'/g)) if (alias) aliases.add(alias);
+    supportsEffort = /--effort\s+<[^>]*>/.test(help.stdout);
   } catch {
-    // Help output is best-effort; the fallback aliases below still apply.
+    // Help output is best-effort. Fall back to the well-known aliases and, because a
+    // capability could not be proven, to not sending the optional flag at all.
   }
   for (const alias of ['opus', 'sonnet', 'haiku']) aliases.add(alias);
-  return [...aliases];
+  return { aliases: [...aliases], supportsEffort };
 }
