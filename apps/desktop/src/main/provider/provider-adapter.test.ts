@@ -4,6 +4,9 @@ import test from 'node:test';
 import { ClaudeCodeAdapter, claudeExecutableCandidates } from './claude-code-adapter';
 import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
 import { modelIdPattern, skillIdPattern } from './identifiers';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { readClaudeModelCatalog } from './claude-model-catalog';
 import { cappedPermissionReason, effectivePermissionMode } from './permission-ceiling';
 import type { LocalRunStore } from '../storage/local-run-store';
 
@@ -61,6 +64,36 @@ test('Codex adapter locates current and legacy npm native executables', () => {
     join(vendorRoot, 'bin', 'codex.exe'),
     join(vendorRoot, 'codex', 'codex.exe'),
   ]);
+});
+
+test('the Claude model catalog reads real ids out of the installed CLI', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'xgen-cli-'));
+  const fake = join(root, 'claude');
+  // Ids straddle chunk boundaries in the real binary, so pad around them.
+  await writeFile(fake, [
+    'x'.repeat(5000),
+    'claude-opus-4-6 claude-sonnet-5 claude-haiku-4-5 claude-fable-5',
+    'claude-opus-4 claude-opus-4-8',
+    'claude-opus-4-20250514 claude-sonnet-4-6-v1',
+    'y'.repeat(5000),
+  ].join(' '));
+  try {
+    const catalog = await readClaudeModelCatalog(fake);
+    const ids = catalog.map((model) => model.id);
+    // Grouped by family in capability order, newest version first within each family.
+    assert.deepEqual(ids, ['claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-haiku-4-5']);
+    assert.equal(catalog[1]?.label, 'Claude Opus 4.8');
+    // A dated snapshot must not be offered as a version.
+    assert.ok(!ids.some((id) => /\d{8}/.test(id)));
+    // The bare major is dropped once its concrete versions are present.
+    assert.ok(!ids.includes('claude-opus-4'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('an unreadable CLI yields no catalog rather than throwing', async () => {
+  assert.deepEqual(await readClaudeModelCatalog(join(tmpdir(), 'xgen-missing-cli')), []);
 });
 
 test('the permission ceiling can only lower a run, never raise it', () => {

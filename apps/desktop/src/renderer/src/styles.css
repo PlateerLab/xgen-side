@@ -882,6 +882,9 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .provider-select { padding-left: 6px; }
 .provider-select > svg:first-child { position: static; width: 14px; height: 14px; color: var(--accent); }
 .provider-select select { max-width: 82px; padding-left: 4px; }
+/* The model list carries full version names, so it needs more room than the other
+   compact selects before the label is clipped. */
+.model-select select { max-width: 150px; }
 .composer-mic { color: var(--text-faint); }
 .send-button { width: 31px; height: 31px; }
 .send-button svg { width: 16px; height: 16px; }

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentRunRequest, ProviderStatus } from '../../shared/contracts';
 import { LocalRunStore, type RunSession } from '../storage/local-run-store';
 import type { BrowserBridge, ProviderAdapter, ProviderRunPlan, ProviderStreamEvent } from './provider-adapter';
+import { readClaudeModelCatalog } from './claude-model-catalog';
 import { authError, collect, launchLoginTerminal, locateNativeExecutable, safeEnvironment } from './provider-runtime';
 
 const fallbackModels = [
@@ -220,27 +221,32 @@ export async function listClaudeModels(
   const models: Array<{ id: string; label: string }> = [];
   const seen = new Set<string>();
   const push = (id: string, label: string): void => {
-    const key = label.trim().toLowerCase().replace(/^claude\s+/, '');
-    if (!key || seen.has(key)) return;
-    seen.add(key);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
     models.push({ id, label });
   };
 
+  // Account-gated models come first: the CLI caches exactly the ones this plan unlocked,
+  // with the labels it shows for them.
   try {
     const cache = JSON.parse(await readFile(join(home, '.claude.json'), 'utf8')) as {
       additionalModelOptionsCache?: Array<{ value?: unknown; label?: unknown }>;
     };
     for (const entry of cache.additionalModelOptionsCache ?? []) {
       if (typeof entry.value === 'string' && typeof entry.label === 'string' && entry.value) {
-        push(entry.value, `Claude ${entry.label}`);
+        // The cached id carries the context-window suffix, e.g. claude-fable-5[1m]; name it
+        // so it reads as a distinct choice next to the plain id from the catalog.
+        const window = /\[([^\]]+)\]$/.exec(entry.value)?.[1];
+        push(entry.value, `Claude ${entry.label}${window ? ` (${window.toUpperCase()})` : ''}`);
       }
     }
   } catch {
-    // The cache appears after the first login; aliases still apply.
+    // The cache appears after the first login; the catalog below still applies.
   }
 
+  for (const model of await readClaudeModelCatalog(executablePath)) push(model.id, model.label);
   for (const alias of (await claudeCapabilities({ path: executablePath, version })).aliases) {
-    push(alias, `Claude ${alias.charAt(0).toUpperCase()}${alias.slice(1)}`);
+    push(alias, `Claude ${alias.charAt(0).toUpperCase()}${alias.slice(1)} (latest)`);
   }
 
   return models.length ? models : fallbackModels;
