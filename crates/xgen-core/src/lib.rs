@@ -353,11 +353,15 @@ fn valid_environment_entry(name: &str, value: &str) -> bool {
     }
     const SYSTEM_NAMES: &[&str] = &[
         "APPDATA",
+        "CODEX_CA_CERTIFICATE",
         "COMSPEC",
         "HOME",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
         "LANG",
         "LC_ALL",
         "LOCALAPPDATA",
+        "LOGNAME",
         "NO_COLOR",
         "PATH",
         "PATHEXT",
@@ -370,6 +374,7 @@ fn valid_environment_entry(name: &str, value: &str) -> bool {
         "USER",
         "USERPROFILE",
         "WINDIR",
+        "XDG_CACHE_HOME",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
     ];
@@ -495,7 +500,12 @@ mod tests {
                 "toolProfiles": ["core", "tabs"],
                 "environment": {
                     "AGENT_BROWSER_CDP": "http://127.0.0.1:12345",
-                    "XGEN_CREDENTIAL_TOKEN": "private-value"
+                    "XGEN_CREDENTIAL_TOKEN": "private-value",
+                    "LOGNAME": "tester",
+                    "XDG_CACHE_HOME": "/Users/tester/.cache",
+                    "HTTP_PROXY": "http://127.0.0.1:8080",
+                    "HTTPS_PROXY": "http://127.0.0.1:8080",
+                    "CODEX_CA_CERTIFICATE": "/Users/tester/ca.pem"
                 }
             }),
         ));
