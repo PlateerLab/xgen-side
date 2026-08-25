@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.chrome",
+  "settingKey": "builtin:chrome",
+  "category": "Built-in skills",
+  "domain": "Visible XGEN browser",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["browser-navigation", "browser-interaction"], "signals": ["chrome", "browser", "tab", "크롬", "브라우저", "탭"] },
+  "runtime": { "kind": "agent-browser", "capability": "browser-control", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_tab_list", "agent_browser_tab_switch", "agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_scroll", "agent_browser_wait_for_load", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "write", "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get", "click", "fill", "interact"], "confirmActions": ["submit", "upload", "download"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Chrome", "detail": "보이는 브라우저 탭에서 요청된 탐색과 상호작용을 실행합니다" }
+}

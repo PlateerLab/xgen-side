@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chrome"
+  short_description: "Navigate and interact with visible browser tabs"
+  default_prompt: "Use $chrome to complete a task in the visible XGEN browser."

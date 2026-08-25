@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.apple-passwords",
+  "settingKey": "builtin:apple-passwords",
+  "category": "Built-in skills",
+  "domain": "Apple Passwords · Windows Hello fallback",
+  "enabledByDefault": true,
+  "activation": { "role": "guard", "modes": ["browser-agent"], "intents": ["secure-login", "passkey", "autofill"], "signals": ["apple passwords", "icloud passwords", "passwords app", "애플 암호", "아이클라우드 암호"] },
+  "runtime": { "kind": "agent-browser", "capability": "secure-auth", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_tab_list", "agent_browser_snapshot", "agent_browser_auth_login"] },
+  "permissions": { "risk": "consequential", "allowActions": ["read", "get", "snapshot"], "confirmActions": ["interact", "fill", "submit"], "denyActions": ["eval", "network", "state", "expose-secret"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Apple Passwords", "detail": "정확한 사이트 origin에서 OS 보안 저장소를 통한 로그인을 준비합니다" }
+}

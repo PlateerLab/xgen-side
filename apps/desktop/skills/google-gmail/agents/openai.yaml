@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Gmail"
+  short_description: "Read and compose Gmail with approval guards"
+  default_prompt: "Use $google-gmail to work with Gmail while keeping send actions user-controlled."

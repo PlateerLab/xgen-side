@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.google-accounts",
+  "settingKey": "builtin:google-accounts",
+  "category": "Built-in skills",
+  "domain": "accounts.google.com",
+  "enabledByDefault": true,
+  "activation": { "role": "guard", "modes": ["browser-agent"], "intents": ["google-login", "google-account-selection"], "signals": ["google account", "google login", "gmail login", "구글 로그인", "구글 계정"] },
+  "runtime": { "kind": "agent-browser", "capability": "secure-auth", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_tab_list", "agent_browser_open", "agent_browser_snapshot", "agent_browser_auth_login", "agent_browser_wait_for_load"] },
+  "permissions": { "risk": "consequential", "allowActions": ["navigate", "snapshot", "read", "get", "wait"], "confirmActions": ["interact", "fill", "submit"], "denyActions": ["eval", "network", "state", "expose-secret"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Google Accounts", "detail": "공식 Google 계정 화면에서 사용자 제어형 로그인을 준비합니다" }
+}

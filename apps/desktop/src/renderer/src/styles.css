@@ -1377,8 +1377,8 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 
 .left-panel {
   inset: 0 auto 0 0;
-  width: 220px;
-  min-width: 220px;
+  width: 252px;
+  min-width: 252px;
   border-width: 0 1px 0 0;
   border-radius: 0;
   background: rgba(92, 92, 92, 0.96);
@@ -1690,7 +1690,7 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 
 /* Settings use the app sidebar as the first-level navigation. */
 .settings-surface { z-index: 80; inset: 0; background: #1b1b1b; }
-.settings-shell-layout { display: grid; width: 100%; height: 100%; grid-template-columns: 220px minmax(0, 1fr); }
+.settings-shell-layout { display: grid; width: 100%; height: 100%; grid-template-columns: 248px minmax(0, 1fr); }
 .settings-shell-nav { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 42px 8px 12px; border-right: 1px solid rgba(255, 255, 255, 0.07); background: #2b2b2b; }
 .settings-app-back { display: flex; width: 100%; min-height: 36px; align-items: center; gap: 8px; padding: 0 7px; border-radius: 7px; color: #a6a6a6; text-align: left; background: transparent; font-size: 12px; }
 .settings-app-back:hover { color: #eeeeee; background: rgba(255, 255, 255, 0.06); }
@@ -1737,6 +1737,58 @@ svg { width: 20px; height: 20px; flex: 0 0 auto; }
 .app-shell[data-theme="light"] .settings-main .settings-group, .app-shell[data-theme="light"] .settings-main .aside-provider-list, .app-shell[data-theme="light"] .settings-main .aside-settings-list { background: #ffffff; }
 
 @media (max-width: 760px) {
-  .settings-shell-layout { grid-template-columns: 190px minmax(0, 1fr); }
+  .settings-shell-layout { grid-template-columns: 220px minmax(0, 1fr); }
   .settings-main .settings-detail-scroll { padding-right: 24px; padding-left: 24px; }
+}
+
+/* Readability and Aside layout parity. Keep the visible chrome at native scale. */
+.app-shell { font-size: 14px; }
+.brand-button strong { font-size: 13px; }
+.nav-section-title { font-size: 13px; }
+.nav-copy strong { font-size: 13px; }
+.footer-action, .profile-menu button { font-size: 12px; }
+.profile-menu-title, .profile-menu button > small { font-size: 10px; }
+.home-header h1, .address-form input { font-size: 12px; }
+.composer textarea { font-size: 14px; }
+.composer-project, .skill-run-select select, .permission-mode-select select, .compact-select select { font-size: 11px; }
+.new-tab-search input { font-size: 14px; }
+.new-tab-mode button, .new-tab-ask-tools button { font-size: 12px; }
+.message p, .markdown-content ul, .markdown-content ol { font-size: 15px; line-height: 1.64; }
+.message-meta, .overview-header strong, .aside-used-skill, .aside-run-step strong, .aside-run-waiting { font-size: 12px; }
+.aside-run-step small, .aside-run-command, .aside-run-snapshot figcaption { font-size: 11px; }
+.overview-request, .overview-step strong, .overview-browser-canvas p { font-size: 12px; }
+.overview-step small, .overview-header small, .overview-browser-note small { font-size: 10px; }
+.agent-header strong, .page-context p { font-size: 14px; }
+
+.settings-primary-group h2 { font-size: 11px; }
+.settings-app-back, .settings-primary-group button, .settings-search input { font-size: 13px; }
+.settings-refresh, .settings-search-empty { font-size: 12px; }
+.settings-main .settings-page-heading h1 { font-size: 27px; }
+.settings-group > header strong { font-size: 14px; }
+.settings-group > header p { font-size: 12px; }
+.settings-row strong { font-size: 13px; }
+.settings-row small { font-size: 11px; }
+.setting-value { font-size: 12px; }
+.aside-setting-block > h2, .aside-provider-row strong, .aside-connect-row > button, .aside-settings-list strong { font-size: 12px; }
+.aside-provider-row small, .provider-usage, .aside-provider-message, .aside-settings-list small, .aside-settings-list select, .aside-workspace-dependencies b { font-size: 10px; }
+
+.settings-workbench { grid-template-columns: 276px minmax(0, 1fr); }
+.resource-sidebar > header strong { font-size: 14px; }
+.resource-sidebar > header small { font-size: 10px; }
+.resource-search input { font-size: 12px; }
+.resource-group > header { font-size: 11px; }
+.resource-group > header small { font-size: 10px; }
+.resource-file { min-height: 48px; }
+.resource-file strong { font-size: 12px; }
+.resource-file small { font-size: 10px; }
+.resource-detail-heading > div > span { font-size: 10px; }
+.resource-detail-heading p { font-size: 12px; }
+.resource-metadata small { font-size: 10px; }
+.resource-metadata strong { font-size: 12px; }
+.markdown-document > header > span, .markdown-document > header button { font-size: 10px; }
+.markdown-document-preview p, .markdown-document-preview li { font-size: 13px; line-height: 1.72; }
+.source-gutter, .source-code, .source-editor textarea { font-size: 12px; }
+
+@media (max-width: 1120px) {
+  .settings-workbench { grid-template-columns: 250px minmax(0, 1fr); }
 }

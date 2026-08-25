@@ -131,16 +131,25 @@ const mcpDefinitions: McpDefinition[] = [
   { id: 'filesystem', name: 'Local Files', command: 'filesystem --roots selected', transport: 'stdio', tools: ['read_file', 'list_directory'], permissions: ['Selected roots only', 'Writes require approval'], status: 'Needs scope' },
 ];
 
+const asideBuiltInSkillIds = new Set([
+  'builtin.apple-passwords', 'builtin.aside', 'builtin.bitwarden', 'builtin.captcha-solver', 'builtin.chrome',
+  'xgen.docx', 'builtin.draft-preview', 'builtin.google-accounts', 'builtin.google-docs', 'builtin.google-gmail',
+  'builtin.google-search', 'builtin.google-sheets', 'builtin.image-search', 'builtin.notification-activation',
+  'builtin.notion', 'xgen.password-manager', 'xgen.pdf', 'xgen.pptx', 'builtin.skill-creator', 'builtin.slack',
+  'builtin.visual-browse', 'xgen.xlsx', 'builtin.youtube',
+]);
+
 function groupSkillCatalog(catalog: SkillCatalogEntry[], enabled: Record<string, boolean>): SkillDomain[] {
   const accents: Record<string, string> = { Core: '#305eeb', Research: '#0f766e', Browser: '#7c3aed', Safety: '#b45309' };
   const categories = new Map<string, SkillDomain>();
   for (const skill of catalog) {
-    const id = skill.category.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const category = asideBuiltInSkillIds.has(skill.id) ? 'Built-in skills' : skill.category;
+    const id = category.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-');
     const current = categories.get(id) ?? {
       id,
-      label: skill.category,
+      label: category,
       host: skill.domain,
-      accent: accents[skill.category] ?? '#305eeb',
+      accent: accents[category] ?? '#305eeb',
       expanded: true,
       skills: [],
     };
@@ -148,7 +157,11 @@ function groupSkillCatalog(catalog: SkillCatalogEntry[], enabled: Record<string,
     current.skills.push({ ...skill, enabled: enabled[skill.settingKey] ?? skill.enabledByDefault });
     categories.set(id, current);
   }
-  return [...categories.values()];
+  return [...categories.values()].sort((left, right) => {
+    if (left.label === 'Built-in skills') return -1;
+    if (right.label === 'Built-in skills') return 1;
+    return left.label.localeCompare(right.label);
+  });
 }
 
 export function App(): ReactElement {
@@ -213,7 +226,7 @@ export function App(): ReactElement {
   const selectableSkills = useMemo(() => skillDomains.flatMap((domain) => domain.skills).filter((skill) => skill.enabled), [skillDomains]);
   const linkedAgentChatId = chatIdForAgentTab(chatMessages, activeTab);
   const linkedAgentMessages = linkedAgentChatId ? chatMessages[linkedAgentChatId] ?? [] : [];
-  const leftWidth = leftOpen ? 220 : 0;
+  const leftWidth = leftOpen ? 252 : 0;
   const isBlankBrowserTab = surface === 'browser' && (!activeTab || activeTab.url === 'about:blank');
   const homeSourcePreviewVisible = surface === 'home' && sourcePreviewOpen && Boolean(activeTab);
   const homeDockWidth = homeSourcePreviewVisible ? 540 : 0;
@@ -1596,7 +1609,8 @@ function SkillWorkbench(props: {
     const needle = props.search.trim().toLowerCase();
     return !needle || `${domain.label} ${domain.host} ${skill.name} ${skill.description}`.toLowerCase().includes(needle);
   }), [props.domains, props.search]);
-  const [selectedId, setSelectedId] = useState('xgen.web-research');
+  const builtInCount = resources.filter(({ domain }) => domain.label === 'Built-in skills').length;
+  const [selectedId, setSelectedId] = useState('builtin.apple-passwords');
   const selected = resources.find(({ skill }) => skill.id === selectedId) ?? resources[0];
   useEffect(() => {
     if (selected && !resources.some(({ skill }) => skill.id === selectedId)) setSelectedId(selected.skill.id);
@@ -1604,7 +1618,7 @@ function SkillWorkbench(props: {
   return (
     <div className="settings-workbench">
       <aside className="resource-sidebar">
-        <header><div><strong>Skills</strong><small>{resources.length} files</small></div><Document24Regular /></header>
+        <header><div><strong>Skills</strong><small>{builtInCount} built-in · {resources.length} total</small></div><Document24Regular /></header>
         <label className="resource-search"><Search24Regular /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="Search skills" /></label>
         <div className="resource-tree">
           {props.domains.map((domain) => {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube"
+  short_description: "Search and inspect YouTube content"
+  default_prompt: "Use $youtube to find and summarize YouTube videos in the visible browser."

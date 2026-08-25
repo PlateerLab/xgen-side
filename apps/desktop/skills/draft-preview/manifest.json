@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.draft-preview",
+  "settingKey": "builtin:draft-preview",
+  "category": "Built-in skills",
+  "domain": "Local run artifacts",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["chat"], "intents": ["preview-draft", "review-artifact"], "signals": ["draft preview", "preview draft", "초안 미리보기", "결과 미리보기", "검토"] },
+  "runtime": { "kind": "llm", "capability": "artifact-preview", "tools": [] },
+  "permissions": { "risk": "read", "allowActions": ["read run artifacts"], "confirmActions": ["replace artifact"], "denyActions": ["overwrite source attachment"] },
+  "progress": { "label": "Draft Preview", "detail": "생성한 초안과 로컬 artifact를 변경 없이 미리 봅니다" }
+}

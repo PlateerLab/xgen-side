@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.notification-activation",
+  "settingKey": "builtin:notification-activation",
+  "category": "Built-in skills",
+  "domain": "Site and OS notifications",
+  "enabledByDefault": true,
+  "activation": { "role": "guard", "modes": ["browser-agent"], "intents": ["allow-notifications", "test-notifications"], "signals": ["enable notifications", "allow notifications", "알림 허용", "알림 켜", "notification"] },
+  "runtime": { "kind": "agent-browser", "capability": "notification-permission", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core"], "tools": ["agent_browser_snapshot", "agent_browser_click", "agent_browser_wait_for_text", "agent_browser_get_url"] },
+  "permissions": { "risk": "consequential", "allowActions": ["snapshot", "read", "get", "wait"], "confirmActions": ["click", "interact", "allow-notification"], "denyActions": ["fill", "upload", "download", "eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Notification Activation", "detail": "사이트 알림 권한을 사용자 승인 후 활성화합니다" }
+}

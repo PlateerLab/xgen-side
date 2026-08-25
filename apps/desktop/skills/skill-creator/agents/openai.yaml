@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Creator"
+  short_description: "Create validated XGEN Side skill packages"
+  default_prompt: "Use $skill-creator to create a reusable XGEN Side skill package."

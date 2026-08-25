@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notion"
+  short_description: "Read and edit Notion pages in the browser"
+  default_prompt: "Use $notion to work with a Notion page in the visible browser."

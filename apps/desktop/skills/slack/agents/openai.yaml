@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slack"
+  short_description: "Read and compose Slack messages with guards"
+  default_prompt: "Use $slack to work with Slack while keeping message sends user-controlled."

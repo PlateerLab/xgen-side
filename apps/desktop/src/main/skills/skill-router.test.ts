@@ -187,7 +187,19 @@ test('blocks browser execution when every required browser skill is disabled', a
 
 test('loads the real Skill packages and their runtime bindings', () => {
   const catalog = router().list();
-  assert.equal(catalog.length, 14);
+  const builtInIds = new Set([
+    'builtin.apple-passwords', 'builtin.aside', 'builtin.bitwarden', 'builtin.captcha-solver', 'builtin.chrome',
+    'xgen.docx', 'builtin.draft-preview', 'builtin.google-accounts', 'builtin.google-docs', 'builtin.google-gmail',
+    'builtin.google-search', 'builtin.google-sheets', 'builtin.image-search', 'builtin.notification-activation',
+    'builtin.notion', 'xgen.password-manager', 'xgen.pdf', 'xgen.pptx', 'builtin.skill-creator', 'builtin.slack',
+    'builtin.visual-browse', 'xgen.xlsx', 'builtin.youtube',
+  ]);
+  assert.equal(catalog.length, 32);
+  assert.equal(catalog.filter((skill) => builtInIds.has(skill.id)).length, 23);
+  assert.deepEqual(
+    catalog.filter((skill) => builtInIds.has(skill.id)).map((skill) => skill.name).sort(),
+    ['Apple Passwords', 'Aside', 'Bitwarden', 'Captcha Solver', 'Chrome', 'DOCX', 'Draft Preview', 'Google Accounts', 'Google Docs', 'Google Gmail', 'Google Search', 'Google Sheets', 'Image Search', 'Notification Activation', 'Notion', 'PDF', 'PPTX', 'Password Manager', 'Skill Creator', 'Slack', 'Visual Browse', 'XLSX', 'Youtube'].sort(),
+  );
   assert.equal(catalog.find((skill) => skill.id === 'xgen.web-research')?.runtime.kind, 'provider-web');
   assert.deepEqual(catalog.find((skill) => skill.id === 'xgen.browser-navigation')?.runtime.toolProfiles, ['core', 'tabs']);
   assert.match(catalog.find((skill) => skill.id === 'xgen.form-guard')?.markdown ?? '', /## Workflow/);

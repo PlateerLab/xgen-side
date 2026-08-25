@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.bitwarden",
+  "settingKey": "builtin:bitwarden",
+  "category": "Built-in skills",
+  "domain": "User-installed Bitwarden integration",
+  "enabledByDefault": true,
+  "activation": { "role": "guard", "modes": ["browser-agent"], "intents": ["bitwarden-login", "vault-autofill"], "signals": ["bitwarden", "비트워든"] },
+  "runtime": { "kind": "agent-browser", "capability": "secure-auth", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_tab_list", "agent_browser_snapshot", "agent_browser_auth_login"] },
+  "permissions": { "risk": "consequential", "allowActions": ["read", "get", "snapshot"], "confirmActions": ["interact", "fill", "submit"], "denyActions": ["eval", "network", "state", "expose-secret"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Bitwarden", "detail": "설치된 Bitwarden 통합을 확인하고 사용자 승인형 autofill을 준비합니다" }
+}

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.google-docs",
+  "settingKey": "builtin:google-docs",
+  "category": "Built-in skills",
+  "domain": "docs.google.com",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["read-google-doc", "edit-google-doc"], "signals": ["google docs", "google document", "구글 문서", "구글 독스"] },
+  "runtime": { "kind": "agent-browser", "capability": "google-docs", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_wait_for_load", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "write", "allowActions": ["navigate", "snapshot", "read", "get", "wait", "click", "fill", "interact"], "confirmActions": ["submit", "share", "publish"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Google Docs", "detail": "보이는 Google 문서에서 요청된 내용을 읽거나 편집합니다" }
+}

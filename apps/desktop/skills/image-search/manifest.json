@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.image-search",
+  "settingKey": "builtin:image-search",
+  "category": "Built-in skills",
+  "domain": "Visible image search",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["search-images", "find-visual-reference"], "signals": ["image search", "find images", "photo search", "이미지 검색", "사진 찾아"] },
+  "runtime": { "kind": "agent-browser", "capability": "image-search", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_screenshot", "agent_browser_click", "agent_browser_scroll", "agent_browser_wait_for_load", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "read", "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get", "click"], "confirmActions": ["download"], "denyActions": ["fill", "upload", "eval", "network", "state", "submit"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Image Search", "detail": "이미지 결과와 실제 출처 페이지를 함께 확인합니다" }
+}

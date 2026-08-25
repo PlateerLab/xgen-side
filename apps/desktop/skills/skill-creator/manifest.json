@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.skill-creator",
+  "settingKey": "builtin:skill-creator",
+  "category": "Built-in skills",
+  "domain": "Local XGEN skill packages",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["chat"], "intents": ["create-skill", "update-skill"], "signals": ["create skill", "new skill", "update skill", "스킬 만들어", "스킬 생성", "스킬 수정"] },
+  "runtime": { "kind": "llm", "capability": "skill-authoring", "tools": [] },
+  "permissions": { "risk": "write", "allowActions": ["write selected skill directory"], "confirmActions": ["replace existing skill"], "denyActions": ["write outside selected workspace"] },
+  "progress": { "label": "Skill Creator", "detail": "활성화 조건과 권한 경계를 포함한 Skill 패키지를 생성합니다" }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Sheets"
+  short_description: "Read and edit Google Sheets in the browser"
+  default_prompt: "Use $google-sheets to work with a Google spreadsheet in the visible browser."

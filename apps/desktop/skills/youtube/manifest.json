@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.youtube",
+  "settingKey": "builtin:youtube",
+  "category": "Built-in skills",
+  "domain": "youtube.com",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["search-youtube", "inspect-video", "summarize-video"], "signals": ["youtube", "유튜브", "video search", "영상 찾아", "영상 요약"] },
+  "runtime": { "kind": "agent-browser", "capability": "youtube", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_scroll", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "read", "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get", "click"], "confirmActions": ["submit", "subscribe", "comment", "like"], "denyActions": ["fill", "upload", "download", "eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "YouTube", "detail": "YouTube 결과와 영상 정보를 확인합니다" }
+}

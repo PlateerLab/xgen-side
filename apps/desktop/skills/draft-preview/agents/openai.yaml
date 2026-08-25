@@ -1,0 +1,4 @@
+interface:
+  display_name: "Draft Preview"
+  short_description: "Preview generated drafts and local artifacts"
+  default_prompt: "Use $draft-preview to open and review a generated draft before finalizing it."

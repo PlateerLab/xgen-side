@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Accounts"
+  short_description: "Secure Google account login workflows"
+  default_prompt: "Use $google-accounts to sign in to a Google account with user-controlled authentication."

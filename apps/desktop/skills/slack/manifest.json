@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.slack",
+  "settingKey": "builtin:slack",
+  "category": "Built-in skills",
+  "domain": "app.slack.com",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["read-slack", "search-slack", "send-slack"], "signals": ["slack", "슬랙", "channel message", "채널 메시지"] },
+  "runtime": { "kind": "agent-browser", "capability": "slack", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_url"] },
+  "permissions": { "risk": "consequential", "allowActions": ["navigate", "snapshot", "read", "get", "wait", "click", "fill", "interact"], "confirmActions": ["submit", "upload", "send-message", "delete-message"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Slack", "detail": "Slack 채널과 메시지를 확인하고 승인된 작업을 수행합니다" }
+}

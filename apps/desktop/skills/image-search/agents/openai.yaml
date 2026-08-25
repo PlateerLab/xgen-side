@@ -1,0 +1,4 @@
+interface:
+  display_name: "Image Search"
+  short_description: "Find and inspect images from web search"
+  default_prompt: "Use $image-search to find suitable images and report their sources."

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.google-gmail",
+  "settingKey": "builtin:google-gmail",
+  "category": "Built-in skills",
+  "domain": "mail.google.com",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["read-gmail", "draft-email", "send-email"], "signals": ["gmail", "google mail", "지메일", "메일 보내", "이메일 보내"] },
+  "runtime": { "kind": "agent-browser", "capability": "gmail", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_url"] },
+  "permissions": { "risk": "consequential", "allowActions": ["navigate", "snapshot", "read", "get", "wait", "click", "fill", "interact"], "confirmActions": ["submit", "upload", "send-message", "delete-message"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Google Gmail", "detail": "Gmail을 열고 읽기 또는 승인된 메시지 작업을 수행합니다" }
+}

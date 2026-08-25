@@ -223,4 +223,18 @@ The central new-tab region was inspected at native capture size because it conta
 - Privacy: the actual live QR screenshot was not persisted as QA evidence. Login snapshots continue to blur password, OTP, QR, canvas, and passkey-like elements before capture and are limited to the page header region.
 - Automated checks: renderer handoff tests cover login-route tab reveal and agent-owned authentication-tab detection. Type checking, all 91 desktop tests, production build, and `git diff --check` passed.
 
+## Built-in Skills, settings width, and type scale QA
+
+- Source visual truth: `.audit/xgen-built-in-skills-2026-08-14/01-aside-built-in-skills.jpeg`
+- Rendered implementation: `.audit/xgen-built-in-skills-2026-08-14/02-xgen-built-in-skills.jpeg`
+- Combined comparison: `.audit/xgen-built-in-skills-2026-08-14/03-aside-xgen-skills-comparison.jpeg`
+- State: both captures use the same 945 by 768 macOS capture size, dark theme, Settings → Skills, and Apple Passwords selected.
+- Skill coverage: XGEN now presents the exact 23 Aside built-in skill names as the first `Built-in skills` group while retaining nine additional XGEN packages for 32 total skills. The packages contain their own workflow, routing, permission, and platform metadata rather than a display-only copied list.
+- Navigation width: the app sidebar is 252 pixels, the settings navigation is 248 pixels, and the Skills list is 276 pixels. Settings labels and controls no longer clip at native scale.
+- Typography: navigation, chat, composer, run activity, settings, skill list, detail, preview, and editor text increased by roughly one to two pixels while preserving the compact Aside hierarchy.
+- Intentional structural difference: Aside keeps the app sidebar visible beside its settings navigation. XGEN replaces the app sidebar with settings navigation, following the earlier one-depth settings decision, so it avoids an extra column without losing access to `앱으로 돌아가기` or search.
+- Security and platform boundaries: credential workflows use the local approval-gated broker, CAPTCHA remains a visible human handoff, and send, share, delete, or publish actions require confirmation. Apple Passwords uses the XGEN credential boundary with Windows Hello or the OS vault as the Windows path; no model-facing password value is introduced.
+- Native verification: the packaged macOS app opened through Profile → Settings → Skills, exposed the exact 23-name group through accessibility inspection, selected skill details, search, and enabled-state controls without clipping.
+- Automated checks: desktop type checking, all 106 desktop tests, the production directory package, manifest parsing, and `git diff --check` passed.
+
 final result: passed

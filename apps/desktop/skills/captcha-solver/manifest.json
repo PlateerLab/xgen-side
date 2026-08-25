@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.captcha-solver",
+  "settingKey": "builtin:captcha-solver",
+  "category": "Built-in skills",
+  "domain": "Visible human verification",
+  "enabledByDefault": true,
+  "activation": { "role": "guard", "modes": ["browser-agent"], "intents": ["captcha-handoff", "human-verification"], "signals": ["captcha", "recaptcha", "human verification", "캡차", "사람인지 확인"] },
+  "runtime": { "kind": "agent-browser", "capability": "captcha-handoff", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core"], "tools": ["agent_browser_snapshot", "agent_browser_screenshot", "agent_browser_wait_for_selector", "agent_browser_wait_for_text"] },
+  "permissions": { "risk": "read", "allowActions": ["snapshot", "read", "get", "wait"], "confirmActions": [], "denyActions": ["click", "fill", "eval", "network", "state", "solve-captcha"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "CAPTCHA 확인", "detail": "자동화를 멈추고 사용자가 보이는 브라우저에서 인증하도록 전환합니다" }
+}

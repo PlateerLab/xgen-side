@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.google-search",
+  "settingKey": "builtin:google-search",
+  "category": "Built-in skills",
+  "domain": "google.com/search",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["google-search", "web-lookup"], "signals": ["google search", "search google", "구글 검색", "구글에서 찾아"] },
+  "runtime": { "kind": "agent-browser", "capability": "google-search", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_scroll", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "read", "allowActions": ["navigate", "snapshot", "scroll", "wait", "read", "get", "click"], "confirmActions": [], "denyActions": ["fill", "upload", "download", "eval", "network", "state", "submit"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Google Search", "detail": "Google 검색 결과와 원문 출처를 확인합니다" }
+}

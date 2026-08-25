@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aside"
+  short_description: "General product and workspace assistance"
+  default_prompt: "Use $aside to handle a general XGEN Side task using local context."

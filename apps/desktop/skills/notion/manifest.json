@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.notion",
+  "settingKey": "builtin:notion",
+  "category": "Built-in skills",
+  "domain": "notion.so",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["read-notion", "edit-notion"], "signals": ["notion", "노션"] },
+  "runtime": { "kind": "agent-browser", "capability": "notion", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_url"] },
+  "permissions": { "risk": "write", "allowActions": ["navigate", "snapshot", "read", "get", "wait", "click", "fill", "interact"], "confirmActions": ["submit", "upload", "share", "publish", "delete"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Notion", "detail": "보이는 Notion 페이지 또는 데이터베이스를 처리합니다" }
+}

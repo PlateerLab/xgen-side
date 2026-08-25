@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.visual-browse",
+  "settingKey": "builtin:visual-browse",
+  "category": "Built-in skills",
+  "domain": "Visible browser viewport",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["visual-page-inspection", "screenshot-analysis"], "signals": ["visually inspect", "look at the page", "screenshot", "화면 보고", "시각적으로", "스크린샷"] },
+  "runtime": { "kind": "agent-browser", "capability": "visual-browse", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core"], "tools": ["agent_browser_snapshot", "agent_browser_screenshot", "agent_browser_scroll", "agent_browser_wait_for_load", "agent_browser_get_title", "agent_browser_get_url"] },
+  "permissions": { "risk": "read", "allowActions": ["snapshot", "scroll", "wait", "read", "get"], "confirmActions": [], "denyActions": ["click", "fill", "upload", "download", "eval", "network", "state", "submit"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Visual Browse", "detail": "원본 배율의 화면 캡처와 접근성 snapshot을 함께 분석합니다" }
+}

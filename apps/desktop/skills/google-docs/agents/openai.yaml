@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Docs"
+  short_description: "Read and edit Google Docs in the browser"
+  default_prompt: "Use $google-docs to work with a Google document in the visible browser."

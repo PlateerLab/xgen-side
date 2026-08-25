@@ -1,0 +1,4 @@
+interface:
+  display_name: "Captcha Solver"
+  short_description: "Human handoff for CAPTCHA challenges"
+  default_prompt: "Use $captcha-solver to detect a CAPTCHA and hand control to the user safely."

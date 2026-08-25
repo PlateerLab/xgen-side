@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.aside",
+  "settingKey": "builtin:aside",
+  "category": "Built-in skills",
+  "domain": "XGEN Side local workspace",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["chat"], "intents": ["general-assistance", "planning"], "signals": ["xgen side", "aside", "도와줘", "계획"] },
+  "runtime": { "kind": "llm", "capability": "general-assistance", "tools": [] },
+  "permissions": { "risk": "read", "allowActions": ["reason over provided context"], "confirmActions": [], "denyActions": ["implicit external writes"] },
+  "progress": { "label": "Aside", "detail": "일반 요청을 로컬 워크스페이스 경계에서 처리합니다" }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Search"
+  short_description: "Search Google and synthesize visible results"
+  default_prompt: "Use $google-search to research a topic with Google Search."

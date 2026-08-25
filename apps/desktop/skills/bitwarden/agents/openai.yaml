@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bitwarden"
+  short_description: "Secure Bitwarden-assisted browser login"
+  default_prompt: "Use $bitwarden to sign in with a Bitwarden credential without exposing the secret."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notification Activation"
+  short_description: "Request and verify site notification permission"
+  default_prompt: "Use $notification-activation to enable notifications for the current site with user approval."

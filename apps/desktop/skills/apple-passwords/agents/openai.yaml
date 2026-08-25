@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple Passwords"
+  short_description: "Secure Apple Passwords login and autofill"
+  default_prompt: "Use $apple-passwords to sign in with an Apple Passwords credential without exposing the secret."

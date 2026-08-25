@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin.google-sheets",
+  "settingKey": "builtin:google-sheets",
+  "category": "Built-in skills",
+  "domain": "docs.google.com/spreadsheets",
+  "enabledByDefault": true,
+  "activation": { "role": "supplemental", "modes": ["browser-agent"], "intents": ["read-google-sheet", "edit-google-sheet"], "signals": ["google sheets", "google spreadsheet", "구글 시트", "구글 스프레드시트"] },
+  "runtime": { "kind": "agent-browser", "capability": "google-sheets", "adapter": "agent-browser", "server": "xgen_browser", "toolProfiles": ["core", "tabs"], "tools": ["agent_browser_open", "agent_browser_snapshot", "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press", "agent_browser_wait_for_load", "agent_browser_get_text", "agent_browser_get_url"] },
+  "permissions": { "risk": "write", "allowActions": ["navigate", "snapshot", "read", "get", "wait", "click", "fill", "interact"], "confirmActions": ["submit", "share", "publish"], "denyActions": ["eval", "network", "state"] },
+  "presentation": { "browserVisible": true },
+  "progress": { "label": "Google Sheets", "detail": "보이는 Google 스프레드시트의 셀과 수식을 처리합니다" }
+}

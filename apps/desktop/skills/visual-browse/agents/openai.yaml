@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visual Browse"
+  short_description: "Inspect pages through screenshots and layout"
+  default_prompt: "Use $visual-browse to analyze the visible page using snapshots and screenshots."

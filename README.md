@@ -14,6 +14,8 @@ XGEN Side brings general chat, local DOCX, XLSX, PPTX, and PDF work, web researc
 - Browser Agent Overview: when a request requires browser work, display the selected skills, execution steps, target site, permitted actions, and event-driven browser screenshots
 - General chat Skill selector: pin an enabled Skill for a request, or leave it on Auto so the Skill Router chooses the execution boundary
 - Settings replaces the ordinary app sidebar with one searchable first-level settings menu, provides a direct return to the previous app surface, and lets the detail workspace use the full remaining window.
+- The Skills workbench exposes the 23 Aside-observed built-in capabilities as validated XGEN packages. Browser, account, communication, document, preview, visual, and skill-authoring workflows share the same macOS and Windows runtime boundaries; Apple Passwords uses the OS credential broker and falls back to Windows Hello semantics on Windows.
+- The desktop sidebar, Settings navigation, Skills browser, chat transcript, and run activity use the wider Aside-aligned layout and a larger native-scale type hierarchy without applying browser zoom.
 - Aside-style Ask AI, Reply, and Side chat composers. A completed Agent browser tab accepts follow-up messages in the same chat and reuses the visible browser tab.
 - Agent browser tabs: browser-backed chat requests receive a run-owned tab; opening it shows the live page with the same progress stream instead of starting a second run
 - Reasoning effort: use Auto, Fast, Balanced, Deep, or Very Deep for Codex models while unsupported providers keep their own default
