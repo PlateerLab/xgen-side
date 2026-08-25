@@ -244,7 +244,7 @@ export async function listClaudeModels(
     // The cache appears after the first login; the catalog below still applies.
   }
 
-  for (const model of await readClaudeModelCatalog(executablePath)) push(model.id, model.label);
+  for (const model of await readClaudeModelCatalog(executablePath, version)) push(model.id, model.label);
   for (const alias of (await claudeCapabilities({ path: executablePath, version })).aliases) {
     push(alias, `Claude ${alias.charAt(0).toUpperCase()}${alias.slice(1)} (latest)`);
   }

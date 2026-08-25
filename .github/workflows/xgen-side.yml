@@ -2,7 +2,9 @@ name: XGEN Side CI
 
 on:
   push:
-    branches: [main]
+    # Feature branches are validated on Windows as they are pushed, so a branch is
+    # never merged on the strength of a macOS-only run.
+    branches: [main, 'feature/**']
   pull_request:
     branches: [main]
   workflow_dispatch:

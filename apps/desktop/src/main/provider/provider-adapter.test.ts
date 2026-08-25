@@ -4,7 +4,7 @@ import test from 'node:test';
 import { ClaudeCodeAdapter, claudeExecutableCandidates } from './claude-code-adapter';
 import { CodexAdapter, codexBrowserMcpOverrides, codexCompatibilityError, codexNpmExecutableCandidates } from './codex-adapter';
 import { modelIdPattern, skillIdPattern } from './identifiers';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { readClaudeModelCatalog } from './claude-model-catalog';
 import { cappedPermissionReason, effectivePermissionMode } from './permission-ceiling';
@@ -87,6 +87,27 @@ test('the Claude model catalog reads real ids out of the installed CLI', async (
     assert.ok(!ids.some((id) => /\d{8}/.test(id)));
     // The bare major is dropped once its concrete versions are present.
     assert.ok(!ids.includes('claude-opus-4'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a launcher shim falls through to the versioned build beside it', async () => {
+  // Windows leaves a small shim on PATH instead of a symlink, so scanning it finds nothing
+  // and the versioned build the CLI reports has to be found relative to that shim.
+  const root = await mkdtemp(join(tmpdir(), 'xgen-shim-'));
+  await mkdir(join(root, 'bin'), { recursive: true });
+  await mkdir(join(root, 'share', 'claude', 'versions'), { recursive: true });
+  const shim = join(root, 'bin', 'claude.exe');
+  await writeFile(shim, '@echo off\r\nrem launcher only, no model ids here\r\n');
+  await writeFile(join(root, 'share', 'claude', 'versions', '9.9.9.exe'), 'claude-opus-4-6 claude-haiku-4-5');
+  try {
+    assert.deepEqual(
+      (await readClaudeModelCatalog(shim, '9.9.9 (Claude Code)')).map((model) => model.id),
+      ['claude-opus-4-6', 'claude-haiku-4-5'],
+    );
+    // Without a parseable version there is nothing else to try, and it must not throw.
+    assert.deepEqual(await readClaudeModelCatalog(shim, 'not a version'), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
