@@ -2,7 +2,7 @@
   "name": "@xgen/side-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows-first AI browser shell for XGEN Side",
+  "description": "AI browser shell for XGEN Side on Windows and macOS",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {

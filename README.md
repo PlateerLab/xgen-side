@@ -1,10 +1,12 @@
 # XGEN Side
 
-A skill-first AI browser that runs locally on Windows.
+A skill-first AI browser that runs locally on Windows and macOS.
 
 XGEN Side brings general chat, web research, and real browser automation together in one desktop application. Auto mode lets the Skill Router choose the smallest required capability for each request, and only the tools and browser actions permitted by the selected skills are exposed at runtime.
 
-> Current status: early Windows desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
+> Current status: early desktop prototype. The core UI, local provider execution, Skill Router, Browser Agent Overview, and local run history are implemented.
+>
+> Windows and macOS are both supported. Windows is the platform CI validates on every push to `main` and every feature branch; macOS is verified locally, since the repository has no macOS runner yet.
 
 ## Product layout
 
@@ -59,7 +61,7 @@ XGEN Side does not read or store provider subscription tokens. Optional website 
 
 ## Local execution and security
 
-- Uses Windows PowerShell as the default command shell
+- Uses each platform's own shell by default: PowerShell on Windows, zsh on macOS, bash on Linux
 - Routes commands through the Command Broker instead of executing them directly
 - Separates read-only commands, approval-required commands, and denied commands
 - Records execution requests, skill routes, approval results, output, and errors in local files
@@ -70,27 +72,29 @@ XGEN Side does not read or store provider subscription tokens. Optional website 
 
 ### Requirements
 
-- Windows 11
+- Windows 11, or macOS (verified on macOS 15, Apple silicon)
 - Node.js 24 or later
 - pnpm 11.1.3 or later
 - An installed and authenticated Codex CLI or Claude Code CLI, depending on the providers you want to use
 
 ### Install and run
 
-```powershell
+```shell
 pnpm install
 pnpm dev:xgen-side
 ```
 
 ### Validate
 
-```powershell
+```shell
 pnpm typecheck:xgen-side
 pnpm test:xgen-side
 pnpm build:xgen-side
 ```
 
-GitHub Actions runs only these three checks on Windows. It does not automatically run the upstream npm publishing pipeline, create GitHub Releases, or build Linux and macOS binaries.
+GitHub Actions runs only these three checks, on Windows, for `main` and for every `feature/**` branch. It does not automatically run the upstream npm publishing pipeline, create GitHub Releases, or build Linux and macOS binaries.
+
+On macOS, a plain `pnpm install` rewrites `pnpm-lock.yaml` wholesale. Use `pnpm install --frozen-lockfile` and do not commit a lockfile regenerated there, because CI installs with `--frozen-lockfile` and will fail on it.
 
 ## Repository structure
 
@@ -109,7 +113,7 @@ See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs
 
 ## Current implementation
 
-- [x] Windows Electron application shell
+- [x] Windows and macOS Electron application shell
 - [x] General chat and browser session UI
 - [x] Collapsible left and right panels
 - [x] Light and dark themes
@@ -124,6 +128,7 @@ See the [XGEN Side overview](XGEN_SIDE.md) and [architecture documentation](docs
 - [ ] Live Electron tab rendering inside the Overview
 - [ ] Approval UI for command and consequential browser actions
 - [ ] Windows installer and automatic updates
+- [ ] macOS job in CI, once the lockfile rewrite above is understood
 
 ## Upstream
 

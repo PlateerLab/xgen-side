@@ -4,7 +4,7 @@
 
 XGEN Side is the product. The upstream agent-browser codebase is its browser automation engine, not its end-user interface.
 
-The desktop application owns tabs, navigation, user interaction, approval surfaces, Windows integration, and task presentation. The engine owns deterministic browser inspection and automation through CDP.
+The desktop application owns tabs, navigation, user interaction, approval surfaces, operating-system integration, and task presentation. The engine owns deterministic browser inspection and automation through CDP.
 
 ## Components
 
@@ -20,13 +20,13 @@ The desktop process reserves a random loopback CDP port at startup. Browser agen
 
 ### Provider manager
 
-Provider adapters execute native provider CLIs with `shell: false` and send user prompts over stdin. A Windows app does not need to route every prompt through PowerShell. PowerShell is used only for a visible, user-controlled OAuth login terminal and for commands that pass through the command broker.
+Provider adapters execute native provider CLIs with `shell: false` and send user prompts over stdin. A desktop app does not need to route every prompt through a shell. A shell is used only for a visible, user-controlled OAuth login terminal, which is PowerShell on Windows and Terminal.app on macOS, and for commands that pass through the command broker.
 
 `ProviderManager` is provider-neutral. It owns validation, sessions, browser policy, timeouts, logs, cancellation, and the common run lifecycle. `CodexAdapter` and `ClaudeCodeAdapter` implement the same `ProviderAdapter` contract for discovery, authentication, run planning, response parsing, and stream-event normalization. Adding another local CLI provider does not add provider branches to the manager.
 
 Provider subprocess output is parsed line by line while the process is active. The main process emits provider-neutral run, route, text, activity, and completion events through a request-scoped IPC channel. The preload keeps renderer callbacks isolated by run ID, and cancellation is accepted only from the renderer that started the run. The final provider output remains available for deterministic parsing and local diagnostics.
 
-Codex runs with an XGEN-specific `CODEX_HOME`. The official CLI stores its own session in Windows Credential Manager through the `keyring` setting. XGEN Side never reads or copies the token. Chat, Search, and Ask page use the Codex read-only sandbox. Browser agent uses the workspace-write sandbox only for its isolated session workspace.
+Codex runs with an XGEN-specific `CODEX_HOME`. The official CLI stores its own session in the operating system keychain through the `keyring` setting, which is Windows Credential Manager on Windows and the Keychain on macOS. XGEN Side never reads or copies the token. Chat, Search, and Ask page use the Codex read-only sandbox. Browser agent uses the workspace-write sandbox only for its isolated session workspace.
 
 Claude Code runs with an XGEN-specific `CLAUDE_CONFIG_DIR`. The official CLI owns login and credential storage; XGEN Side only launches `claude auth login`, checks `claude auth status`, and sends prompts to `claude -p` over stdin. Chat, Search, and Ask page use Claude permission modes plus explicit tool deny lists inside an isolated session workspace. Browser agent receives only the local `xgen_browser` MCP server and an action policy. These controls are application guardrails rather than an operating-system sandbox.
 
@@ -69,7 +69,7 @@ Guard is the default. The policy engine classifies browser, file, network, crede
 
 ### Command broker
 
-The command broker runs outside the renderer process. The bootstrap implementation lives in the Electron main process behind a typed IPC boundary. It supports PowerShell, CMD, and WSL Bash. A later milestone will move it to a dedicated Rust process using Windows Job Objects and Named Pipes.
+The command broker runs outside the renderer process. The bootstrap implementation lives in the Electron main process behind a typed IPC boundary. It supports PowerShell, CMD, and WSL Bash on Windows, and bash and zsh on macOS and Linux, refusing a shell the running platform cannot host with a message that names both. Its deny list is matched against every request regardless of the shell named, so a destructive command is blocked whether it is written in PowerShell or POSIX form. A later milestone will move it to a dedicated Rust process using Windows Job Objects and Named Pipes.
 
 ### Tool bus
 
@@ -94,7 +94,7 @@ For an `ask` file transfer, agent-browser holds the MCP call and sends an authen
 - The CDP port is random and loopback-only. It exists only while XGEN Side is running.
 - Provider subprocesses inherit an environment allowlist that excludes API keys and access-token variables.
 - User prompts are passed through stdin, never interpolated into a shell command.
-- Published builds are code signed and use Windows-native secret storage.
+- Published builds are code signed and use the operating system's native secret storage.
 
 ## Upstream strategy
 

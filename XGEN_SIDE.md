@@ -1,8 +1,8 @@
 # XGEN Side
 
-XGEN Side is a Windows-first AI browser built on top of the agent-browser automation engine.
+XGEN Side is an AI browser for Windows and macOS, built on top of the agent-browser automation engine.
 
-The upstream project remains the browser control engine. XGEN Side adds a native desktop browser surface, a guarded command broker, model and tool adapters, task orchestration, and Windows security integration.
+The upstream project remains the browser control engine. XGEN Side adds a native desktop browser surface, a guarded command broker, model and tool adapters, task orchestration, and operating-system security integration.
 
 ## Development status
 
@@ -44,16 +44,16 @@ Optional Auto login credentials are stored in a separate OS-encrypted local vaul
 
 Use Node.js 24 or later.
 
-```powershell
+```shell
 pnpm install
 pnpm dev:xgen-side
 pnpm test:xgen-side
 pnpm typecheck:xgen-side
 ```
 
-If an upstream workspace prepare script prevents a filtered pnpm command on Windows, invoke the isolated runner directly:
+If an upstream workspace prepare script prevents a filtered pnpm command, invoke the isolated runner directly:
 
-```powershell
+```shell
 node scripts/xgen-side.mjs typecheck
 node scripts/xgen-side.mjs test
 node scripts/xgen-side.mjs build
