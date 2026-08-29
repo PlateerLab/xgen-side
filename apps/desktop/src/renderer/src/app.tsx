@@ -54,6 +54,7 @@ import type {
   LocalMarkdownFile,
   ProviderId,
   ProviderStatus,
+  RouteCorrection,
   SkillCatalogEntry,
   SkillRoute,
 } from '../../shared/contracts';
@@ -390,7 +391,7 @@ export function App(): ReactElement {
     setTabs(await window.xgenSide.browser.navigate(address));
   }
 
-  async function sendHomeMessage(event: FormEvent | undefined, rerun?: { prompt: string; mode: AgentMode }): Promise<void> {
+  async function sendHomeMessage(event: FormEvent | undefined, rerun?: Rerun): Promise<void> {
     event?.preventDefault();
     const value = (rerun?.prompt ?? homePrompt).trim();
     if (!value || homeBusy) return;
@@ -409,6 +410,7 @@ export function App(): ReactElement {
       sourceSurface: 'chat' as const,
       browserTarget: 'new-agent-tab' as const,
       permissionMode,
+      routeCorrection: rerun?.correction,
     };
     let overviewId: string | undefined;
     const responseId = crypto.randomUUID();
@@ -648,7 +650,7 @@ export function App(): ReactElement {
           onCancel={() => void cancelHomeRun()}
           onOpenBrowser={(id) => void openBrowserTab(id)}
           onOpenSource={(url) => void openSourcePreview(url)}
-          onRerun={(prompt, mode) => void sendHomeMessage(undefined, { prompt, mode })}
+          onRerun={(prompt, mode, correction) => void sendHomeMessage(undefined, { prompt, mode, correction })}
           onOpenChat={(id) => { setActiveChatId(id); setSurface('home'); }}
           onSubmit={(event) => void sendHomeMessage(event)}
           prompt={homePrompt}
@@ -892,7 +894,7 @@ function HomeSurface(props: ConversationSurfaceProps & {
   leftWidth: number;
   onOpenBrowser(id: string): void;
   onOpenSource(url: string): void;
-  onRerun(prompt: string, mode: AgentMode): void;
+  onRerun(prompt: string, mode: AgentMode, correction: RouteCorrection): void;
   onOpenChat(id: string): void;
   rightWidth: number;
   tabs: BrowserTabState[];
@@ -1405,7 +1407,16 @@ function Toggle(props: { checked: boolean; onChange(value: boolean): void }): Re
   return <label className="toggle"><input type="checkbox" aria-label="사용 여부 전환" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /><span /></label>;
 }
 
-function MessageBubble({ message, onOpenLink, onRerun }: { message: ChatMessage; onOpenLink?(url: string): void; onRerun?(prompt: string, mode: AgentMode): void }): ReactElement {
+/** A rerun carries the route it is correcting, so the mistake is recorded with it. */
+interface Rerun {
+  prompt: string;
+  mode: AgentMode;
+  correction: RouteCorrection;
+}
+
+type RerunHandler = (prompt: string, mode: AgentMode, correction: RouteCorrection) => void;
+
+function MessageBubble({ message, onOpenLink, onRerun }: { message: ChatMessage; onOpenLink?(url: string): void; onRerun?: RerunHandler }): ReactElement {
   if (message.overview) return <AgentOverview overview={message.overview} onRerun={onRerun} />;
   return (
     <article className={`message message-${message.role}`}>
@@ -1436,7 +1447,7 @@ function MessageBubble({ message, onOpenLink, onRerun }: { message: ChatMessage;
   );
 }
 
-function AgentOverview({ overview, onRerun }: { overview: NonNullable<ChatMessage['overview']>; onRerun?(prompt: string, mode: AgentMode): void }): ReactElement {
+function AgentOverview({ overview, onRerun }: { overview: NonNullable<ChatMessage['overview']>; onRerun?: RerunHandler }): ReactElement {
   const [expanded, setExpanded] = useState(overview.status === 'running');
   const statusLabel = overview.status === 'running'
     ? 'Running'
@@ -1466,7 +1477,14 @@ function AgentOverview({ overview, onRerun }: { overview: NonNullable<ChatMessag
       {rerunTargets.length > 0 && <div className="overview-rerun">
         <span>{answeredByLabel[overview.route.resolvedMode]}</span>
         {rerunTargets.map((target) => (
-          <button key={target.mode} type="button" onClick={() => onRerun?.(overview.prompt, target.mode)}>
+          <button
+            key={target.mode}
+            type="button"
+            onClick={() => onRerun?.(overview.prompt, target.mode, {
+              sessionId: overview.sessionId,
+              routedMode: overview.route.resolvedMode,
+            })}
+          >
             {target.label}
           </button>
         ))}

@@ -21,6 +21,7 @@ import { LocalRunStore, type RunSession } from '../storage/local-run-store';
 import { BrowserApprovalBroker } from '../security/browser-approval-broker';
 import { LocalSettingsStore } from '../storage/local-settings-store';
 import { SkillRouter } from '../skills/skill-router';
+import { sanitizeRouteCorrection } from '../skills/route-correction';
 import { ClaudeCodeAdapter } from './claude-code-adapter';
 import { CodexAdapter, codexCompatibilityError } from './codex-adapter';
 import type { BrowserBridge, ProviderAdapter } from './provider-adapter';
@@ -89,8 +90,9 @@ export class ProviderManager {
 
   async run(request: AgentRunRequest, options: AgentRunOptions = {}): Promise<AgentRunResult> {
     validateRunRequest(request);
+    const routeCorrection = sanitizeRouteCorrection(request.routeCorrection);
     const adapter = this.adapter(request.providerId);
-    const session = await this.store.createSession(request);
+    const session = await this.store.createSession({ ...request, routeCorrection });
     const runId = options.runId ?? session.id;
     let eventWrites = Promise.resolve();
     const now = (): string => new Date().toISOString();
@@ -117,6 +119,12 @@ export class ProviderManager {
     };
     await this.store.append(session, 'skills.routed', request.providerId, request.mode, {
       routeId: route.id,
+      // Both modes are recorded because the requested one is usually 'auto', which
+      // says nothing about what the router picked. A stored run is only usable as
+      // routing evidence if it says what was asked for and what was decided.
+      requestedMode: request.mode,
+      resolvedMode: route.resolvedMode,
+      routeCorrection,
       reason: route.reason,
       cappedPermissionReason: route.cappedPermissionReason,
       skills: route.skills.map((skill) => ({ id: skill.id, settingKey: skill.settingKey, risk: skill.risk })),

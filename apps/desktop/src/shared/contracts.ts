@@ -185,6 +185,19 @@ export interface AgentRunRequest {
   sourceSurface?: AgentRunSource;
   browserTarget?: BrowserTargetPreference;
   permissionMode?: AgentPermissionMode;
+  routeCorrection?: RouteCorrection;
+}
+
+/**
+ * Set when the user re-ran an earlier request in a mode the router did not pick.
+ * The pair of routedMode and the new run's mode is a labelled routing mistake,
+ * which is the only ground truth the app can collect without asking for it.
+ */
+export interface RouteCorrection {
+  /** The run the user was looking at when they asked for a different mode. */
+  sessionId?: string;
+  /** The mode the router resolved for that run. */
+  routedMode: ResolvedAgentMode;
 }
 
 export interface AgentRunResult {
