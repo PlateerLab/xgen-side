@@ -1,4 +1,10 @@
-export type ShellKind = 'powershell' | 'cmd' | 'wsl';
+/**
+ * Every shell the command broker can spawn. The IPC boundary validates against
+ * this list, so a new shell cannot be accepted without the broker supporting it.
+ */
+export const shellKinds = ['powershell', 'cmd', 'wsl', 'bash', 'zsh'] as const;
+
+export type ShellKind = (typeof shellKinds)[number];
 
 export type BrowserTabOwner = 'user' | 'agent';
 export type BrowserAgentStatus = 'running' | 'completed' | 'failed' | 'cancelled';

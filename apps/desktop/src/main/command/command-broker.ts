@@ -75,34 +75,35 @@ export class CommandBroker {
   private async execute(request: CommandRequest, reason: string): Promise<CommandResult> {
     const startedAt = Date.now();
     const cwd = resolve(request.cwd ?? process.cwd());
-    const primary = shellCommand(request.shell, request.script, false);
+    const platform = process.platform;
+    const finish = (result: { exitCode: number; stdout: string; stderr: string }): CommandResult => ({
+      state: result.exitCode === 0 ? 'completed' : 'failed',
+      decision: 'allow',
+      reason,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      durationMs: Date.now() - startedAt,
+    });
 
     try {
-      const result = await spawnAndCollect(primary.command, primary.args, cwd);
-      return {
-        state: result.exitCode === 0 ? 'completed' : 'failed',
-        decision: 'allow',
-        reason,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        durationMs: Date.now() - startedAt,
-      };
-    } catch (error) {
-      if (request.shell === 'powershell' && isMissingExecutable(error)) {
-        const fallback = shellCommand(request.shell, request.script, true);
-        const result = await spawnAndCollect(fallback.command, fallback.args, cwd);
-        return {
-          state: result.exitCode === 0 ? 'completed' : 'failed',
-          decision: 'allow',
-          reason,
-          exitCode: result.exitCode,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          durationMs: Date.now() - startedAt,
-        };
-      }
+      const primary = shellCommand(request.shell, request.script, { platform, powershellFallback: false });
 
+      try {
+        return finish(await spawnAndCollect(primary.command, primary.args, cwd));
+      } catch (error) {
+        // Some Windows images ship the legacy powershell.exe but not pwsh.exe.
+        // POSIX has no such pair, so there is nothing to fall back to there.
+        if (request.shell === 'powershell' && platform === 'win32' && isMissingExecutable(error)) {
+          const fallback = shellCommand(request.shell, request.script, { platform, powershellFallback: true });
+          return finish(await spawnAndCollect(fallback.command, fallback.args, cwd));
+        }
+        if (isMissingExecutable(error)) {
+          throw new Error(`The ${request.shell} shell is not installed on this machine (${primary.command} was not found).`);
+        }
+        throw error;
+      }
+    } catch (error) {
       return {
         state: 'failed',
         decision: 'allow',
@@ -114,22 +115,42 @@ export class CommandBroker {
   }
 }
 
-function shellCommand(
+/** The shell the broker uses when a caller does not name one. */
+export function defaultShellForPlatform(platform: NodeJS.Platform): ShellKind {
+  if (platform === 'win32') return 'powershell';
+  return platform === 'darwin' ? 'zsh' : 'bash';
+}
+
+export function shellCommand(
   shell: ShellKind,
   script: string,
-  powershellFallback: boolean,
+  options: { platform: NodeJS.Platform; powershellFallback: boolean },
 ): { command: string; args: string[] } {
+  const windows = options.platform === 'win32';
+
   switch (shell) {
     case 'powershell':
       return {
-        command: powershellFallback ? 'powershell.exe' : 'pwsh.exe',
+        command: windows ? (options.powershellFallback ? 'powershell.exe' : 'pwsh.exe') : 'pwsh',
         args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
       };
     case 'cmd':
+      if (!windows) throw unsupportedShell(shell, options.platform);
       return { command: 'cmd.exe', args: ['/d', '/s', '/c', script] };
     case 'wsl':
+      if (!windows) throw unsupportedShell(shell, options.platform);
       return { command: 'wsl.exe', args: ['--exec', 'bash', '-lc', script] };
+    case 'bash':
+    case 'zsh':
+      // Windows reaches a POSIX shell through the `wsl` kind, which keeps the
+      // Linux userland boundary explicit instead of guessing at a bash on PATH.
+      if (windows) throw unsupportedShell(shell, options.platform);
+      return { command: shell, args: ['-lc', script] };
   }
+}
+
+function unsupportedShell(shell: ShellKind, platform: NodeJS.Platform): Error {
+  return new Error(`The ${shell} shell is not available on ${platform}.`);
 }
 
 function spawnAndCollect(

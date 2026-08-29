@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, type IpcMainInvokeEvent, 
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { BrowserWorkspace } from './browser-workspace';
-import { CommandBroker } from './command/command-broker';
+import { CommandBroker, defaultShellForPlatform } from './command/command-broker';
 import { BrowserApprovalBroker } from './security/browser-approval-broker';
 import { CredentialAutofillService } from './security/credential-autofill';
 import { AgentBrowserClient } from './engine/agent-browser-client';
@@ -11,6 +11,7 @@ import { ProviderManager } from './provider/provider-manager';
 import { CredentialVault } from './storage/credential-vault';
 import { LocalRunStore } from './storage/local-run-store';
 import { LocalSettingsStore } from './storage/local-settings-store';
+import { shellKinds } from '../shared/contracts';
 import type { AgentRunEvent, AgentRunRequest, AppSettings, BrowserLayoutState, CommandRequest, CredentialSaveRequest, ProviderId } from '../shared/contracts';
 
 let mainWindow: BrowserWindow | undefined;
@@ -294,11 +295,17 @@ function reserveLoopbackPort(): Promise<number> {
 }
 
 function sanitizeCommandRequest(request: CommandRequest): CommandRequest {
-  if (!request || !['powershell', 'cmd', 'wsl'].includes(request.shell)) {
+  if (!request) {
+    throw new Error('Unsupported command shell.');
+  }
+  // A caller that does not care which shell runs the script gets the one that
+  // exists on this platform, rather than a hardcoded PowerShell.
+  const shell = request.shell ?? defaultShellForPlatform(process.platform);
+  if (!shellKinds.includes(shell)) {
     throw new Error('Unsupported command shell.');
   }
   if (typeof request.script !== 'string' || request.script.length > 20_000) {
     throw new Error('Command scripts must be text shorter than 20,000 characters.');
   }
-  return { shell: request.shell, script: request.script };
+  return { shell, script: request.script };
 }
